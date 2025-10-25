@@ -1,8 +1,10 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
-# Using Django's built-in JSONField instead of PostgreSQL-specific one
+from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
+from django.utils.crypto import get_random_string
+import uuid
 
 
 class Employee(models.Model):
@@ -197,6 +199,25 @@ class Employee(models.Model):
             return "Active"
         else:
             return "Inactive"
+    
+    def set_password(self, raw_password):
+        """Set the password for the employee"""
+        self.password = make_password(raw_password)
+        self.save()
+    
+    def check_password(self, raw_password):
+        """Check if the provided password matches the employee's password"""
+        return check_password(raw_password, self.password)
+    
+    def authenticate(self, email, password):
+        """Authenticate an employee with email and password"""
+        try:
+            employee = Employee.objects.get(email=email, is_active=True)
+            if employee.check_password(password):
+                return employee
+        except Employee.DoesNotExist:
+            pass
+        return None
 
 
 class EmergencyContact(models.Model):
@@ -290,3 +311,59 @@ class EmployeeHistory(models.Model):
 
     def __str__(self):
         return f"EmployeeHistory(employee_id={self.employee_id}, action={self.action}, at={self.timestamp})"
+
+
+class PasswordResetToken(models.Model):
+    """
+    Model to store password reset tokens for employees
+    """
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens',
+        help_text="Employee requesting password reset"
+    )
+    token = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Unique token for password reset"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(help_text="Token expiration time")
+    is_used = models.BooleanField(
+        default=False,
+        help_text="Whether this token has been used"
+    )
+    
+    class Meta:
+        db_table = 'password_reset_tokens'
+        ordering = ['-created_at']
+        verbose_name = 'Password Reset Token'
+        verbose_name_plural = 'Password Reset Tokens'
+    
+    def __str__(self):
+        return f"PasswordResetToken(employee={self.employee.email}, created={self.created_at})"
+    
+    def is_expired(self):
+        """Check if the token has expired"""
+        return timezone.now() > self.expires_at
+    
+    def is_valid(self):
+        """Check if the token is valid (not used and not expired)"""
+        return not self.is_used and not self.is_expired()
+    
+    @classmethod
+    def create_token(cls, employee):
+        """Create a new password reset token for an employee"""
+        # Delete any existing unused tokens for this employee
+        cls.objects.filter(employee=employee, is_used=False).delete()
+        
+        # Create new token
+        token = get_random_string(50)
+        expires_at = timezone.now() + timezone.timedelta(hours=1)  # 1 hour expiry
+        
+        return cls.objects.create(
+            employee=employee,
+            token=token,
+            expires_at=expires_at
+        )

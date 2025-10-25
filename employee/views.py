@@ -1,21 +1,34 @@
 from rest_framework import viewsets, status, filters
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count
 from django.http import Http404
+from django.core.mail import send_mail
+from django.conf import settings
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
-from .models import Employee, EmergencyContact, EmployeeHistory
+from .models import Employee, EmergencyContact, EmployeeHistory, PasswordResetToken
 from .serializers import (
     EmployeeListSerializer,
     EmployeeDetailSerializer,
     EmployeeCreateUpdateSerializer,
     EmployeeStatsSerializer,
     EmergencyContactSerializer,
-    EmployeeHistorySerializer
+    EmployeeHistorySerializer,
+    UserLoginSerializer,
+    ForgotPasswordSerializer,
+    ResetPasswordSerializer,
+    ChangePasswordSerializer,
+    UserResponseSerializer,
+    LoginResponseSerializer,
+    AuthResponseSerializer,
+    RegistrationResponseSerializer
 )
 
 
@@ -177,14 +190,19 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
     
     @extend_schema(
-        summary="Create Super Admin employee",
-        description="Create a new Super Admin employee. The account_type is automatically set to 'super_admin'.",
-        tags=["Employees"],
+        summary="Create Super Admin employee (Registration)",
+        description="Create a new Super Admin employee with password. Acts as registration API.",
+        tags=["Authentication"],
+        request=EmployeeCreateUpdateSerializer,
+        responses={
+            201: RegistrationResponseSerializer,
+            400: AuthResponseSerializer
+        },
         examples=[
             OpenApiExample(
-                "Super Admin Example",
+                "Super Admin Registration Example",
                 summary="Create Super Admin",
-                description="Example of creating a Super Admin employee",
+                description="Example of creating a Super Admin employee with registration response",
                 value={
                     "staff_type": "employee",
                     "first_name": "John",
@@ -206,32 +224,52 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             )
         ]
     )
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def add_super_admin(self, request):
         """
-        Create a new Super Admin employee
+        Create a new Super Admin employee (Registration)
         """
         # Automatically set account_type to super_admin
         data = request.data.copy()
         data['account_type'] = 'super_admin'
         
         serializer = EmployeeCreateUpdateSerializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        employee = serializer.save()
+        if serializer.is_valid():
+            employee = serializer.save()
+            
+            # Generate JWT tokens for registration
+            refresh = RefreshToken.for_user(employee)
+            access_token = refresh.access_token
+            
+            # Prepare registration response data
+            response_data = {
+                "success": True,
+                "message": "Super Admin registration successful.",
+                "data": UserResponseSerializer(employee).data
+            }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
         
-        # Return detailed employee data
-        detail_serializer = EmployeeDetailSerializer(employee)
-        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+        return Response({
+            "success": False,
+            "message": "Super Admin registration failed.",
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     @extend_schema(
-        summary="Create Sales Staff employee",
-        description="Create a new Sales Staff employee. The account_type is automatically set to 'sales_staff'.",
-        tags=["Employees"],
+        summary="Create Sales Staff employee (Registration)",
+        description="Create a new Sales Staff employee with password. Acts as registration API.",
+        tags=["Authentication"],
+        request=EmployeeCreateUpdateSerializer,
+        responses={
+            201: RegistrationResponseSerializer,
+            400: AuthResponseSerializer
+        },
         examples=[
             OpenApiExample(
-                "Sales Staff Example",
+                "Sales Staff Registration Example",
                 summary="Create Sales Staff",
-                description="Example of creating a Sales Staff employee",
+                description="Example of creating a Sales Staff employee with registration response",
                 value={
                     "staff_type": "employee",
                     "first_name": "Jane",
@@ -253,22 +291,37 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             )
         ]
     )
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def add_sales_staff(self, request):
         """
-        Create a new Sales Staff employee
+        Create a new Sales Staff employee (Registration)
         """
         # Automatically set account_type to sales_staff
         data = request.data.copy()
         data['account_type'] = 'sales_staff'
         
         serializer = EmployeeCreateUpdateSerializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        employee = serializer.save()
+        if serializer.is_valid():
+            employee = serializer.save()
+            
+            # Generate JWT tokens for registration
+            refresh = RefreshToken.for_user(employee)
+            access_token = refresh.access_token
+            
+            # Prepare registration response data
+            response_data = {
+                "success": True,
+                "message": "Sales Staff registration successful.",
+                "data": UserResponseSerializer(employee).data
+            }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
         
-        # Return detailed employee data
-        detail_serializer = EmployeeDetailSerializer(employee)
-        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+        return Response({
+            "success": False,
+            "message": "Sales Staff registration failed.",
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     def retrieve(self, request, *args, **kwargs):
         """
@@ -622,3 +675,301 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 {"error": "Emergency contact not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+# Authentication Views
+
+@extend_schema(
+    summary="User Login",
+    description="Login with email and password to get JWT tokens",
+    tags=["Authentication"],
+    request=UserLoginSerializer,
+    responses={
+        200: LoginResponseSerializer,
+        400: AuthResponseSerializer,
+        401: AuthResponseSerializer
+    },
+    examples=[
+        OpenApiExample(
+            "Login Example",
+            summary="User Login",
+            description="Example of user login",
+            value={
+                "username": "john@example.com",
+                "password": "Password123!",
+                "remember_me": True,
+                "forgot_password": False
+            }
+        )
+    ],
+    operation_id="login_user",
+    methods=["POST"]
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_user(request):
+    """
+    Login user and return JWT tokens
+    """
+    serializer = UserLoginSerializer(data=request.data)
+    if serializer.is_valid():
+        email = serializer.validated_data['username']
+        password = serializer.validated_data['password']
+        
+        # Authenticate employee
+        try:
+            employee = Employee.objects.get(email=email, is_active=True)
+            if not employee.check_password(password):
+                employee = None
+        except Employee.DoesNotExist:
+            employee = None
+        if employee:
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(employee)
+            access_token = refresh.access_token
+            
+            # Prepare user data
+            user_data = {
+                "user_id": employee.id,
+                "name": employee.full_name,
+                "email": employee.email
+            }
+            
+            response_data = {
+                "success": True,
+                "message": "Login successful.",
+                "token": str(access_token),
+                "user": user_data
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                "success": False,
+                "message": "Invalid credentials."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+    
+    return Response({
+        "success": False,
+        "message": "Login failed.",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    summary="Forgot Password",
+    description="Send password reset link to user's email",
+    tags=["Authentication"],
+    request=ForgotPasswordSerializer,
+    responses={
+        200: AuthResponseSerializer,
+        400: AuthResponseSerializer,
+        500: AuthResponseSerializer
+    },
+    examples=[
+        OpenApiExample(
+            "Forgot Password Example",
+            summary="Forgot Password",
+            description="Example of forgot password request",
+            value={
+                "email": "john@example.com"
+            }
+        )
+    ]
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    """
+    Send password reset link to user's email
+    """
+    serializer = ForgotPasswordSerializer(data=request.data)
+    if serializer.is_valid():
+        email = serializer.validated_data['email']
+        
+        try:
+            employee = Employee.objects.get(email=email, is_active=True)
+            
+            # Create password reset token
+            reset_token = PasswordResetToken.create_token(employee)
+            
+            # Send email with reset link
+            reset_link = f"https://yourapp.com/reset-password?token={reset_token.token}"
+            
+            subject = "Password Reset Request"
+            message = f"""Hello {employee.full_name},
+
+We received a request to reset your password. Click the link below to set a new password:
+
+{reset_link}
+
+If you didn't request a password reset, please ignore this email.
+
+Thank you,
+YourApp Support Team"""
+            
+            try:
+                send_mail(
+                    subject,
+                    message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [employee.email],
+                    fail_silently=False,
+                )
+                
+                return Response({
+                    "success": True,
+                    "message": "Password reset link sent to your email address."
+                }, status=status.HTTP_200_OK)
+                
+            except Exception as e:
+                return Response({
+                    "success": False,
+                    "message": "Failed to send email. Please try again later."
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Employee.DoesNotExist:
+            # Don't reveal if email exists or not for security
+            return Response({
+                "success": True,
+                "message": "Password reset link sent to your email address."
+            }, status=status.HTTP_200_OK)
+    
+    return Response({
+        "success": False,
+        "message": "Invalid request.",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    summary="Reset Password",
+    description="Reset password using token from email",
+    tags=["Authentication"],
+    request=ResetPasswordSerializer,
+    responses={
+        200: AuthResponseSerializer,
+        400: AuthResponseSerializer
+    },
+    examples=[
+        OpenApiExample(
+            "Reset Password Example",
+            summary="Reset Password",
+            description="Example of password reset",
+            value={
+                "token": "abc123xyz",
+                "new_password": "NewPassword123!",
+                "confirm_password": "NewPassword123!"
+            }
+        )
+    ]
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    """
+    Reset password using token
+    """
+    serializer = ResetPasswordSerializer(data=request.data)
+    if serializer.is_valid():
+        token = serializer.validated_data['token']
+        new_password = serializer.validated_data['new_password']
+        
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token)
+            if reset_token.is_valid():
+                # Update employee password
+                employee = reset_token.employee
+                employee.set_password(new_password)
+                
+                # Mark token as used
+                reset_token.is_used = True
+                reset_token.save()
+                
+                return Response({
+                    "success": True,
+                    "message": "Password has been reset successfully."
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "success": False,
+                    "message": "Invalid or expired token."
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except PasswordResetToken.DoesNotExist:
+            return Response({
+                "success": False,
+                "message": "Invalid token."
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    return Response({
+        "success": False,
+        "message": "Password reset failed.",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    summary="Change Password",
+    description="Change password for authenticated user",
+    tags=["Authentication"],
+    request=ChangePasswordSerializer,
+    responses={
+        200: AuthResponseSerializer,
+        400: AuthResponseSerializer,
+        404: AuthResponseSerializer
+    },
+    examples=[
+        OpenApiExample(
+            "Change Password Example",
+            summary="Change Password",
+            description="Example of changing password",
+            value={
+                "current_password": "OldPass123!",
+                "new_password": "NewPass123!",
+                "retype_new_password": "NewPass123!"
+            }
+        )
+    ]
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Change password for authenticated user
+    """
+    serializer = ChangePasswordSerializer(data=request.data)
+    if serializer.is_valid():
+        current_password = serializer.validated_data['current_password']
+        new_password = serializer.validated_data['new_password']
+        
+        # Get the authenticated employee
+        try:
+            employee = Employee.objects.get(id=request.user.id)
+            
+            # Verify current password
+            if not employee.check_password(current_password):
+                return Response({
+                    "success": False,
+                    "message": "Current password is incorrect."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Update password
+            employee.set_password(new_password)
+            
+            return Response({
+                "success": True,
+                "message": "Password changed successfully."
+            }, status=status.HTTP_200_OK)
+            
+        except Employee.DoesNotExist:
+            return Response({
+                "success": False,
+                "message": "User not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response({
+        "success": False,
+        "message": "Password change failed.",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)

@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from django.contrib.auth.hashers import make_password
 from django.core.files.base import ContentFile
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 import base64
 import uuid
-from .models import Employee, EmergencyContact, EmployeeHistory
+from .models import Employee, EmergencyContact, EmployeeHistory, PasswordResetToken
 
 
 class Base64ImageField(serializers.Field):
@@ -254,3 +256,136 @@ class EmployeeHistorySerializer(serializers.ModelSerializer):
             'timestamp'
         ]
         read_only_fields = ['id', 'timestamp']
+
+
+# Authentication Serializers
+
+class UserLoginSerializer(serializers.Serializer):
+    """
+    Serializer for user login
+    """
+    username = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True, write_only=True)
+    remember_me = serializers.BooleanField(default=False, required=False)
+    forgot_password = serializers.BooleanField(default=False, required=False)
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for forgot password request
+    """
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        """
+        Validate that email exists
+        """
+        if not Employee.objects.filter(email=value, is_active=True).exists():
+            raise serializers.ValidationError("No active employee found with this email address.")
+        return value
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for password reset
+    """
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+    confirm_password = serializers.CharField(required=True, write_only=True)
+    
+    def validate(self, attrs):
+        """
+        Validate that passwords match and token is valid
+        """
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError("Passwords don't match.")
+        
+        try:
+            reset_token = PasswordResetToken.objects.get(token=attrs['token'])
+            if not reset_token.is_valid():
+                raise serializers.ValidationError("Invalid or expired token.")
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid token.")
+        
+        return attrs
+    
+    def validate_new_password(self, value):
+        """
+        Validate password strength
+        """
+        try:
+            validate_password(value)
+        except ValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        return value
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Serializer for changing password
+    """
+    current_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+    retype_new_password = serializers.CharField(required=True, write_only=True)
+    
+    def validate(self, attrs):
+        """
+        Validate that new passwords match
+        """
+        if attrs['new_password'] != attrs['retype_new_password']:
+            raise serializers.ValidationError("New passwords don't match.")
+        return attrs
+    
+    def validate_new_password(self, value):
+        """
+        Validate password strength
+        """
+        try:
+            validate_password(value)
+        except ValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        return value
+
+
+class UserResponseSerializer(serializers.ModelSerializer):
+    """
+    Serializer for user response data
+    """
+    user_id = serializers.IntegerField(source='id', read_only=True)
+    name = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(read_only=True)
+    
+    class Meta:
+        model = Employee
+        fields = ['user_id', 'name', 'email', 'created_at']
+    
+    def get_name(self, obj):
+        return obj.full_name
+
+
+class LoginResponseSerializer(serializers.Serializer):
+    """
+    Serializer for login response
+    """
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    token = serializers.CharField()
+    user = serializers.DictField()
+
+
+class AuthResponseSerializer(serializers.Serializer):
+    """
+    Serializer for authentication responses (success/error)
+    """
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    errors = serializers.DictField(required=False)
+
+
+class RegistrationResponseSerializer(serializers.Serializer):
+    """
+    Serializer for registration response
+    """
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    data = UserResponseSerializer()
