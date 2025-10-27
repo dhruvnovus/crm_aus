@@ -161,7 +161,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
     
     def validate_password(self, value):
         """
-        Hash password before saving
+        Hash password before saving 
         """
         if value:
             return make_password(value)
