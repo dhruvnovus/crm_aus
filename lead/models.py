@@ -12,9 +12,12 @@ class Lead(models.Model):
     # Lead Status Choices
     STATUS_CHOICES = [
         ('new', 'New'),
+        ('attendee', 'Attendee'),
+        ('job_leads', 'Job Leads'),
         ('info_pack', 'Info Pack'),
         ('attempted_contact', 'Attempted Contact'),
         ('contacted', 'Contacted'),
+        ('contract_signed', 'Contract Signed'),
         ('contract_invoice_sent', 'Contract & Invoice Sent'),
         ('contract_signed_paid', 'Contract Signed & Paid'),
         ('withdrawn', 'Withdrawn'),

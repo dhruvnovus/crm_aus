@@ -26,6 +26,7 @@ urlpatterns = [
     # CRM app URLs
     path('api/', include('employee.urls')),
     path('api/', include('lead.urls')),
+    path('api/', include('dashboard.urls')),
     
     # Swagger UI URLs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
