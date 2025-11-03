@@ -798,12 +798,12 @@ def login_user(request):
             refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
             
-            # Prepare user data
-            user_data = {
-                "user_id": user.id,
-                "name": employee.full_name,
-                "email": employee.email
-            }
+            # Prepare user data: include full employee details in response
+            from .serializers import EmployeeDetailSerializer
+            detail = EmployeeDetailSerializer(employee).data
+            # Keep backward compatibility for clients expecting user_id
+            detail["user_id"] = employee.id
+            user_data = detail
             
             response_data = {
                 "success": True,
