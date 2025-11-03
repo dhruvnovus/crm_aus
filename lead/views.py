@@ -82,6 +82,19 @@ class LeadViewSet(viewsets.ModelViewSet):
     ]
     ordering_fields = ['date_received', 'created_at', 'updated_at', 'first_name', 'last_name', 'company_name', 'opportunity_price']
     ordering = ['-date_received']
+
+    @staticmethod
+    def _first_error(errors):
+        try:
+            first = next(iter(errors.values()))
+            # errors may be list/tuple/dict
+            while isinstance(first, (list, tuple)) and first:
+                first = first[0]
+            if isinstance(first, dict):
+                first = next(iter(first.values()))
+            return str(first)
+        except Exception:
+            return "Invalid data"
     
     def get_serializer_class(self):
         """
@@ -131,9 +144,12 @@ class LeadViewSet(viewsets.ModelViewSet):
         Create a new lead
         """
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        lead = serializer.save()
-        
+        if not serializer.is_valid():
+            return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lead = serializer.save()
+        except Exception as exc:
+            return Response({"status": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         # Return detailed lead data
         detail_serializer = LeadDetailSerializer(lead)
         return Response({"success": True, "message": "Lead created successfully", "data": detail_serializer.data}, status=status.HTTP_201_CREATED)
@@ -146,12 +162,15 @@ class LeadViewSet(viewsets.ModelViewSet):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        lead = serializer.save()
-        
+        if not serializer.is_valid():
+            return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lead = serializer.save()
+        except Exception as exc:
+            return Response({"status": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         # Return detailed lead data
         detail_serializer = LeadDetailSerializer(lead)
-        return Response(detail_serializer.data)
+        return Response({"success": True, "message": "Lead updated successfully", "data": detail_serializer.data})
     
     def partial_update(self, request, *args, **kwargs):
         """
