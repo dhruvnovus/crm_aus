@@ -169,6 +169,27 @@ class Lead(models.Model):
         null=True,
         help_text="Assigned sales staff member"
     )
+
+    lead_name = models.CharField(
+        max_length=200,
+        blank=True,
+        null=True,
+        help_text="Lead name"
+    )
+
+    lead_pipeline = models.CharField(
+        max_length=200,
+        blank=True,
+        null=True,
+        help_text="Lead pipeline"
+    )
+
+    lead_stage = models.CharField(
+        max_length=200,
+        blank=True,
+        null=True,
+        help_text="Lead stage"
+    )
     
     # Timestamps
     date_received = models.DateTimeField(

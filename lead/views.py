@@ -73,11 +73,12 @@ class LeadViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = [
         'status', 'lead_type', 'intensity', 'assigned_sales_staff', 'event',
-        'sponsorship_type', 'registration_groups', 'tags'
+        'sponsorship_type', 'registration_groups', 'tags', 'lead_name', 'lead_pipeline', 'lead_stage'
     ]
     search_fields = [
         'first_name', 'last_name', 'company_name', 'email_address', 'contact_number',
-        'tags__name', 'sponsorship_type__name', 'registration_groups__name'
+        'tags__name', 'sponsorship_type__name', 'registration_groups__name',
+        'lead_name', 'lead_pipeline', 'lead_stage'
     ]
     ordering_fields = ['date_received', 'created_at', 'updated_at', 'first_name', 'last_name', 'company_name', 'opportunity_price']
     ordering = ['-date_received']
@@ -461,7 +462,8 @@ class LeadViewSet(viewsets.ModelViewSet):
             'Address', 'Event', 'Lead Type', 'Booth Size', 'Sponsorship Type',
             'Registration Groups', 'Status', 'Intensity', 'Opportunity Price',
             'Tags', 'How Did You Hear', 'Reason for Enquiry',
-            'Assigned Sales Staff', 'Date Received', 'Created At', 'Updated At'
+            'Assigned Sales Staff', 'Lead Name', 'Lead Pipeline', 'Lead Stage',
+            'Date Received', 'Created At', 'Updated At'
         ])
         
         # Write data
@@ -477,6 +479,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 registration_names, lead.get_status_display(),
                 lead.get_intensity_display(), lead.opportunity_price, tag_names,
                 lead.how_did_you_hear, lead.reason_for_enquiry, lead.assigned_sales_staff,
+                lead.lead_name, lead.lead_pipeline, lead.lead_stage,
                 lead.date_received, lead.created_at, lead.updated_at
             ])
         

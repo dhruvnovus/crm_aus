@@ -23,7 +23,8 @@ class LeadListSerializer(serializers.ModelSerializer):
             'booth_size', 'sponsorship_type', 'registration_groups', 'status',
             'status_display', 'intensity', 'intensity_display', 'opportunity_price',
             'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry',
-            'assigned_sales_staff', 'date_received', 'created_at', 'updated_at'
+            'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage',
+            'date_received', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at']
 
@@ -45,7 +46,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             'id', 'title', 'first_name', 'last_name','company_name', 'contact_number', 'email_address', 'custom_email_addresses', 'custom_email_list', 'address', 'event',
-            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'date_received', 'created_at', 'updated_at'
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at']
 
@@ -71,7 +72,7 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
             'email_address', 'custom_email_addresses', 'address', 'event',
             'lead_type', 'booth_size', 'sponsorship_type', 'registration_groups',
             'status', 'intensity', 'opportunity_price', 'tags', 'how_did_you_hear',
-            'reason_for_enquiry', 'assigned_sales_staff'
+            'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage'
         ]
         extra_kwargs = {
             'first_name': {'required': True},
