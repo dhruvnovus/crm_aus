@@ -99,7 +99,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         Optionally restricts the returned leads by filtering against
         query parameters in the URL.
         """
-        queryset = Lead.objects.all()
+        # Filter out deleted records by default
+        queryset = Lead.objects.filter(is_deleted=False)
         
         # Filter by status category
         status_category = self.request.query_params.get('status_category', None)
@@ -161,23 +162,32 @@ class LeadViewSet(viewsets.ModelViewSet):
     
     def destroy(self, request, *args, **kwargs):
         """
-        Delete a lead
+        Soft delete a lead (sets is_deleted=True instead of actually deleting)
         """
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            instance = self.get_object()
+            if hasattr(instance, 'is_deleted'):
+                # Use queryset update to avoid model save hooks
+                Lead.objects.filter(pk=instance.pk).update(is_deleted=True)
+            else:
+                # Fallback if column not present yet
+                self.perform_destroy(instance)
+            return Response({"success": True, "message": "Lead deleted successfully"}, status=status.HTTP_200_OK)
+        except Exception as exc:
+            return Response({"success": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    
     
     @extend_schema(
         summary="Get lead statistics",
-        description="Get comprehensive statistics about leads",
+        description="Get comprehensive statistics about leads (excludes deleted records)",
         tags=["Leads"],
     )
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """
-        Get lead statistics
+        Get lead statistics (excludes deleted records)
         """
-        queryset = self.get_queryset()
+        queryset = Lead.objects.filter(is_deleted=False)
         
         stats = {
             'total_leads': queryset.count(),
@@ -443,7 +453,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def export(self, request):
         """
-        Export leads to CSV
+        Export leads to CSV (excludes deleted records by default)
         """
         import csv
         from django.http import HttpResponse
@@ -493,7 +503,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         lead = self.get_object()
-        queryset = LeadHistory.objects.filter(lead=lead).order_by('-timestamp')
+        queryset = LeadHistory.objects.filter(lead=lead, is_deleted=False).order_by('-timestamp')
         page = self.paginate_queryset(queryset)
         serializer = LeadHistorySerializer(page or queryset, many=True)
         if page is not None:
@@ -523,19 +533,30 @@ class LeadViewSet(viewsets.ModelViewSet):
     def delete_history(self, request, history_id=None):
         try:
             entry = LeadHistory.objects.get(id=history_id)
+            # Soft delete instead of hard delete
+            if hasattr(entry, 'is_deleted'):
+                LeadHistory.objects.filter(id=entry.id).update(is_deleted=True)
+                return Response({"success": True, "message": "History entry deleted successfully"}, status=status.HTTP_200_OK)
+            # Fallback if column not present
             entry.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response({"success": True, "message": "History entry deleted"}, status=status.HTTP_200_OK)
         except LeadHistory.DoesNotExist:
             return Response({"error": "History entry not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class RegistrationGroupViewSet(viewsets.ModelViewSet):
-    queryset = RegistrationGroup.objects.all()
+    queryset = RegistrationGroup.objects.filter(is_deleted=False)
     serializer_class = RegistrationGroupSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['name']
     search_fields = ['name']
     ordering_fields = ['name', 'created_at', 'updated_at']
-    ordering = ['name']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """
+        Get queryset (excludes deleted records)
+        """
+        return RegistrationGroup.objects.filter(is_deleted=False)
 
     def get_serializer_class(self):
         return RegistrationGroupSerializer
@@ -587,20 +608,30 @@ class RegistrationGroupViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         """
-        Delete a specific registration group
+        Soft delete a registration group (sets is_deleted=True instead of actually deleting)
         """
         instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        instance.is_deleted = True
+        instance.save()
+        return Response(
+            {"success": True, "message": "Registration group deleted successfully"},
+            status=status.HTTP_200_OK
+        )
 
 class LeadTagViewSet(viewsets.ModelViewSet):
-    queryset = LeadTag.objects.all()
+    queryset = LeadTag.objects.filter(is_deleted=False)
     serializer_class = LeadTagSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['name']
     search_fields = ['name']
     ordering_fields = ['name', 'created_at', 'updated_at']
-    ordering = ['name']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """
+        Get queryset (excludes deleted records)
+        """
+        return LeadTag.objects.filter(is_deleted=False)
 
     def get_serializer_class(self):
         return LeadTagSerializer
@@ -647,20 +678,30 @@ class LeadTagViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         """
-        Delete a specific lead tag
+        Soft delete a lead tag (sets is_deleted=True instead of actually deleting)
         """
         instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        instance.is_deleted = True
+        instance.save()
+        return Response(
+            {"success": True, "message": "Lead tag deleted successfully"},
+            status=status.HTTP_200_OK
+        )
 
 class SponsorshipTypeViewSet(viewsets.ModelViewSet):
-    queryset = SponsorshipType.objects.all()
+    queryset = SponsorshipType.objects.filter(is_deleted=False)
     serializer_class = SponsorshipTypeSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['name']
     search_fields = ['name']
     ordering_fields = ['name', 'created_at', 'updated_at']
-    ordering = ['name']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """
+        Get queryset (excludes deleted records)
+        """
+        return SponsorshipType.objects.filter(is_deleted=False)
 
     def get_serializer_class(self):
         return SponsorshipTypeSerializer
@@ -707,8 +748,12 @@ class SponsorshipTypeViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         """
-        Delete a specific sponsorship type
+        Soft delete a sponsorship type (sets is_deleted=True instead of actually deleting)
         """
         instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        instance.is_deleted = True
+        instance.save()
+        return Response(
+            {"success": True, "message": "Sponsorship type deleted successfully"},
+            status=status.HTTP_200_OK
+        )

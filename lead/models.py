@@ -191,6 +191,10 @@ class Lead(models.Model):
         help_text="Lead stage"
     )
     
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
     # Timestamps
     date_received = models.DateTimeField(
         auto_now_add=True,
@@ -248,6 +252,10 @@ class LeadHistory(models.Model):
     action = models.CharField(max_length=10, choices=ACTION_CHOICES)
     changed_by = models.CharField(max_length=200, blank=True, null=True, help_text='Actor performing change if known')
     changes = models.JSONField(default=dict, blank=True)
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
     timestamp = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -276,6 +284,10 @@ class RegistrationGroup(models.Model):
         unique=True,
         help_text="Name of the registration group"
     )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -297,6 +309,10 @@ class LeadTag(models.Model):
         unique=True,
         help_text="Name of the tag"
     )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -317,6 +333,10 @@ class SponsorshipType(models.Model):
         max_length=200,
         unique=True,
         help_text="Name of the sponsorship type"
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

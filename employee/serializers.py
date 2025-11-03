@@ -65,9 +65,9 @@ class EmergencyContactSerializer(serializers.ModelSerializer):
         model = EmergencyContact
         fields = [
             'id', 'name', 'relationship', 'phone', 'email', 'address',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'is_deleted'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
 
 class EmployeeListSerializer(serializers.ModelSerializer):
@@ -86,9 +86,9 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'id', 'account_type', 'account_type_display', 'staff_type', 'staff_type_display',
             'is_active', 'is_resigned', 'title', 'first_name', 'last_name', 'full_name',
             'email', 'position', 'gender', 'mobile_no', 'address', 'post_code',
-            'profile_image', 'hours_per_week', 'status_display', 'created_at', 'updated_at'
+            'profile_image', 'hours_per_week', 'status_display', 'created_at', 'updated_at', 'is_deleted'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
@@ -113,9 +113,9 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'full_name', 'display_name', 'email', 'password', 'position', 'gender', 'gender_display',
             'date_of_birth', 'mobile_no', 'landline_no', 'language_spoken', 'unit_number',
             'address', 'post_code', 'profile_image', 'admin_notes', 'hours_per_week',
-            'status_display', 'emergency_contacts', 'created_at', 'updated_at'
+            'status_display', 'emergency_contacts', 'created_at', 'updated_at', 'is_deleted'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -135,8 +135,9 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'email', 'password', 'position', 'gender',
             'date_of_birth', 'mobile_no', 'landline_no', 'language_spoken',
             'unit_number', 'address', 'post_code', 'profile_image', 'admin_notes',
-            'hours_per_week', 'emergency_contacts'
+            'hours_per_week', 'emergency_contacts', 'is_deleted'
         ]
+        read_only_fields = ['is_deleted']
         extra_kwargs = {
             'password': {'write_only': True, 'required': True},
             'email': {'required': True},
@@ -253,9 +254,9 @@ class EmployeeHistorySerializer(serializers.ModelSerializer):
         model = EmployeeHistory
         fields = [
             'id', 'employee', 'employee_display', 'action', 'changed_by', 'changes',
-            'timestamp'
+            'timestamp', 'is_deleted'
         ]
-        read_only_fields = ['id', 'timestamp']
+        read_only_fields = ['id', 'timestamp', 'is_deleted']
 
 
 # Authentication Serializers

@@ -103,7 +103,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         Optionally restricts the returned employees by filtering against
         query parameters in the URL.
         """
-        queryset = Employee.objects.all()
+        # Filter out deleted records by default
+        queryset = Employee.objects.filter(is_deleted=False)
         
         # Filter by account type if specified
         account_type = self.request.query_params.get('account_type', None)
@@ -143,7 +144,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         employee = self.get_object()
-        queryset = EmployeeHistory.objects.filter(employee=employee).order_by('-timestamp')
+        queryset = EmployeeHistory.objects.filter(employee=employee, is_deleted=False).order_by('-timestamp')
         page = self.paginate_queryset(queryset)
         serializer = EmployeeHistorySerializer(page or queryset, many=True)
         if page is not None:
@@ -173,8 +174,13 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     def delete_history(self, request, history_id=None):
         try:
             entry = EmployeeHistory.objects.get(id=history_id)
+            # Soft delete instead of hard delete
+            if hasattr(entry, 'is_deleted'):
+                EmployeeHistory.objects.filter(id=entry.id).update(is_deleted=True)
+                return Response({"success": True, "message": "History entry deleted successfully"}, status=status.HTTP_200_OK)
+            # Fallback if column not present
             entry.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response({"success": True, "message": "History entry deleted"}, status=status.HTTP_200_OK)
         except EmployeeHistory.DoesNotExist:
             return Response({"error": "History entry not found."}, status=status.HTTP_404_NOT_FOUND)
     
@@ -395,23 +401,32 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     
     def destroy(self, request, *args, **kwargs):
         """
-        Delete an employee
+        Soft delete an employee (sets is_deleted=True instead of actually deleting)
         """
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            instance = self.get_object()
+            if hasattr(instance, 'is_deleted'):
+                # Use queryset update to avoid model save hooks
+                Employee.objects.filter(pk=instance.pk).update(is_deleted=True)
+            else:
+                # Fallback if column not present yet
+                self.perform_destroy(instance)
+            return Response({"success": True, "message": "Employee deleted successfully"}, status=status.HTTP_200_OK)
+        except Exception as exc:
+            return Response({"success": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    
     
     @extend_schema(
         summary="Get employee statistics",
-        description="Get comprehensive statistics about employees",
+        description="Get comprehensive statistics about employees (excludes deleted records)",
         tags=["Employees"],
     )
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """
-        Get employee statistics
+        Get employee statistics (excludes deleted records)
         """
-        queryset = self.get_queryset()
+        queryset = Employee.objects.filter(is_deleted=False)
         
         stats = {
             'total_employees': queryset.count(),
@@ -510,10 +525,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def emergency_contacts(self, request, pk=None):
         """
-        Get emergency contacts for an employee
+        Get emergency contacts for an employee (excludes deleted records)
         """
         employee = self.get_object()
-        contacts = employee.emergency_contacts.all()
+        contacts = employee.emergency_contacts.filter(is_deleted=False).order_by('-created_at')
         
         serializer = EmergencyContactSerializer(contacts, many=True)
         return Response(serializer.data)
@@ -530,8 +545,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         """
         employee = self.get_object()
         
-        # Check if employee already has maximum emergency contacts
-        if employee.emergency_contacts.count() >= 5:
+        # Check if employee already has maximum emergency contacts (excluding deleted)
+        if employee.emergency_contacts.filter(is_deleted=False).count() >= 5:
             return Response(
                 {"error": "Maximum 5 emergency contacts allowed per employee."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -563,7 +578,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            contact = employee.emergency_contacts.get(id=contact_id)
+            contact = employee.emergency_contacts.filter(is_deleted=False).get(id=contact_id)
         except EmergencyContact.DoesNotExist:
             return Response(
                 {"error": "Emergency contact not found."},
@@ -596,9 +611,13 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            contact = employee.emergency_contacts.get(id=contact_id)
-            contact.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            contact = employee.emergency_contacts.filter(is_deleted=False).get(id=contact_id)
+            contact.is_deleted = True
+            contact.save()
+            return Response(
+                {"success": True, "message": "Emergency contact deleted successfully"},
+                status=status.HTTP_200_OK
+            )
         except EmergencyContact.DoesNotExist:
             return Response(
                 {"error": "Emergency contact not found."},
@@ -613,9 +632,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def all_emergency_contacts(self, request):
         """
-        Get all emergency contacts across all employees
+        Get all emergency contacts across all employees (excludes deleted records by default)
         """
-        queryset = EmergencyContact.objects.select_related('employee')
+        # Filter out deleted records by default
+        queryset = EmergencyContact.objects.filter(is_deleted=False).select_related('employee')
         
         # Apply filters
         employee_id = request.query_params.get('employee_id', None)
@@ -637,8 +657,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 Q(employee__last_name__icontains=search)
             )
         
-        # Apply ordering
-        ordering = request.query_params.get('ordering', 'name')
+        # Apply ordering (default: latest first)
+        ordering = request.query_params.get('ordering', '-created_at')
         if ordering:
             queryset = queryset.order_by(ordering)
         
@@ -653,10 +673,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
     def get_emergency_contact(self, request, contact_id=None):
         """
-        Get a specific emergency contact by ID
+        Get a specific emergency contact by ID (excludes deleted records)
         """
         try:
-            contact = EmergencyContact.objects.select_related('employee').get(id=contact_id)
+            contact = EmergencyContact.objects.filter(is_deleted=False).select_related('employee').get(id=contact_id)
             serializer = EmergencyContactSerializer(contact)
             return Response(serializer.data)
         except EmergencyContact.DoesNotExist:
@@ -673,10 +693,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['put'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
     def update_emergency_contact_by_id(self, request, contact_id=None):
         """
-        Update a specific emergency contact by ID
+        Update a specific emergency contact by ID (cannot update deleted records)
         """
         try:
-            contact = EmergencyContact.objects.get(id=contact_id)
+            contact = EmergencyContact.objects.filter(is_deleted=False).get(id=contact_id)
             serializer = EmergencyContactSerializer(contact, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
             serializer.save()
@@ -695,12 +715,16 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
     def delete_emergency_contact_by_id(self, request, contact_id=None):
         """
-        Delete a specific emergency contact by ID
+        Soft delete a specific emergency contact by ID (sets is_deleted=True instead of actually deleting)
         """
         try:
-            contact = EmergencyContact.objects.get(id=contact_id)
-            contact.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            contact = EmergencyContact.objects.filter(is_deleted=False).get(id=contact_id)
+            contact.is_deleted = True
+            contact.save()
+            return Response(
+                {"success": True, "message": "Emergency contact deleted successfully"},
+                status=status.HTTP_200_OK
+            )
         except EmergencyContact.DoesNotExist:
             return Response(
                 {"error": "Emergency contact not found."},

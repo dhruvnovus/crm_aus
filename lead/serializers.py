@@ -24,9 +24,10 @@ class LeadListSerializer(serializers.ModelSerializer):
             'status_display', 'intensity', 'intensity_display', 'opportunity_price',
             'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry',
             'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage',
-            'date_received', 'created_at', 'updated_at'
+            'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
-        read_only_fields = ['id', 'date_received', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
+
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):
@@ -46,9 +47,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             'id', 'title', 'first_name', 'last_name','company_name', 'contact_number', 'email_address', 'custom_email_addresses', 'custom_email_list', 'address', 'event',
-            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at'
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
-        read_only_fields = ['id', 'date_received', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
 
 class LeadCreateUpdateSerializer(serializers.ModelSerializer):
@@ -161,21 +162,24 @@ class LeadHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = LeadHistory
         fields = [
-            'id', 'lead', 'lead_display', 'action', 'changed_by', 'changes', 'timestamp'
+            'id', 'lead', 'lead_display', 'action', 'changed_by', 'changes', 'timestamp', 'is_deleted'
         ]
-        read_only_fields = ['id', 'timestamp']
+        read_only_fields = ['id', 'timestamp', 'is_deleted']
 
 class RegistrationGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = RegistrationGroup
-        fields = ['id', 'name', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'created_at', 'updated_at', 'is_deleted']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
 class LeadTagSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeadTag
-        fields = ['id', 'name', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'created_at', 'updated_at', 'is_deleted']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
 class SponsorshipTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = SponsorshipType
-        fields = ['id', 'name', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'created_at', 'updated_at', 'is_deleted']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']

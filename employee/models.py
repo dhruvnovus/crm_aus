@@ -167,6 +167,11 @@ class Employee(models.Model):
         help_text="Weekly contracted hours"
     )
     
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -272,12 +277,17 @@ class EmergencyContact(models.Model):
         help_text="Emergency contact's address"
     )
     
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
         db_table = 'emergency_contacts'
-        ordering = ['name']
+        ordering = ['-created_at']
         verbose_name = 'Emergency Contact'
         verbose_name_plural = 'Emergency Contacts'
     
@@ -315,6 +325,10 @@ class EmployeeHistory(models.Model):
         default=dict,
         blank=True,
         help_text='Dictionary of field changes {field: {from: value, to: value}}'
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Is deleted"
     )
     timestamp = models.DateTimeField(default=timezone.now)
 
