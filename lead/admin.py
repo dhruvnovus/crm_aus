@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Lead, LeadHistory
+from .models import Lead, LeadHistory , RegistrationGroup , LeadTag, SponsorshipType
 
 
 @admin.register(Lead)
@@ -58,3 +58,54 @@ class LeadHistoryAdmin(admin.ModelAdmin):
     list_filter = ['action', 'timestamp']
     search_fields = ['lead__first_name', 'lead__last_name', 'lead__company_name']
     readonly_fields = ['lead', 'action', 'changed_by', 'changes', 'timestamp']
+
+@admin.register(RegistrationGroup)
+class RegistrationGroupAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'created_at', 'updated_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        ('Registration Group', {
+            'fields': ('name',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+@admin.register(LeadTag)
+class LeadTagAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'created_at', 'updated_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        ('Lead Tag', {
+            'fields': ('name',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'), 
+            'classes': ('collapse',)
+        }),
+    )
+
+@admin.register(SponsorshipType)
+class SponsorshipTypeAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'created_at', 'updated_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        ('Sponsorship Type', {
+            'fields': ('name',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

@@ -8,14 +8,17 @@ from django.http import Http404
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
-from .models import Lead, LeadHistory
+from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType
 from .serializers import (
     LeadListSerializer,
     LeadDetailSerializer,
     LeadCreateUpdateSerializer,
     LeadStatsSerializer,
     LeadBulkImportSerializer,
-    LeadHistorySerializer
+    LeadHistorySerializer,
+    RegistrationGroupSerializer,
+    LeadTagSerializer,
+    SponsorshipTypeSerializer
 )
 
 
@@ -68,8 +71,14 @@ class LeadViewSet(viewsets.ModelViewSet):
     queryset = Lead.objects.all()
     pagination_class = LeadPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'lead_type', 'intensity', 'assigned_sales_staff', 'event']
-    search_fields = ['first_name', 'last_name', 'company_name', 'email_address', 'contact_number', 'tags']
+    filterset_fields = [
+        'status', 'lead_type', 'intensity', 'assigned_sales_staff', 'event',
+        'sponsorship_type', 'registration_groups', 'tags'
+    ]
+    search_fields = [
+        'first_name', 'last_name', 'company_name', 'email_address', 'contact_number',
+        'tags__name', 'sponsorship_type__name', 'registration_groups__name'
+    ]
     ordering_fields = ['date_received', 'created_at', 'updated_at', 'first_name', 'last_name', 'company_name', 'opportunity_price']
     ordering = ['-date_received']
     
@@ -125,25 +134,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         
         # Return detailed lead data
         detail_serializer = LeadDetailSerializer(lead)
-        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+        return Response({"success": True, "message": "Lead created successfully", "data": detail_serializer.data}, status=status.HTTP_201_CREATED)
     
-    def retrieve(self, request, *args, **kwargs):
-        """
-        Retrieve a specific lead
-        """
-        instance = self.get_object()
-        # log read
-        try:
-            LeadHistory.objects.create(
-                lead=instance,
-                action='read',
-                changed_by=None,
-                changes={}
-            )
-        except Exception:
-            pass
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
     
     def update(self, request, *args, **kwargs):
         """
@@ -474,13 +466,16 @@ class LeadViewSet(viewsets.ModelViewSet):
         
         # Write data
         for lead in queryset:
+            sponsorship_names = ", ".join([s.name for s in lead.sponsorship_type.all()])
+            registration_names = ", ".join([r.name for r in lead.registration_groups.all()])
+            tag_names = ", ".join([t.name for t in lead.tags.all()])
             writer.writerow([
                 lead.id, lead.get_title_display(), lead.first_name, lead.last_name,
                 lead.company_name, lead.contact_number, lead.email_address,
                 lead.custom_email_addresses, lead.address, lead.event,
-                lead.get_lead_type_display(), lead.booth_size, lead.sponsorship_type,
-                lead.registration_groups, lead.get_status_display(),
-                lead.get_intensity_display(), lead.opportunity_price, lead.tags,
+                lead.get_lead_type_display(), lead.booth_size, sponsorship_names,
+                registration_names, lead.get_status_display(),
+                lead.get_intensity_display(), lead.opportunity_price, tag_names,
                 lead.how_did_you_hear, lead.reason_for_enquiry, lead.assigned_sales_staff,
                 lead.date_received, lead.created_at, lead.updated_at
             ])
@@ -529,3 +524,188 @@ class LeadViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except LeadHistory.DoesNotExist:
             return Response({"error": "History entry not found."}, status=status.HTTP_404_NOT_FOUND)
+
+class RegistrationGroupViewSet(viewsets.ModelViewSet):
+    queryset = RegistrationGroup.objects.all()
+    serializer_class = RegistrationGroupSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['name']
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at', 'updated_at']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return RegistrationGroupSerializer
+
+    def list(self, request, *args, **kwargs):
+        """
+        List registration groups with optional filtering
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve a specific registration group
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new registration group
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        registration_group = serializer.save()
+
+        detail_serializer = RegistrationGroupSerializer(registration_group)
+        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update a specific registration group
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        registration_group = serializer.save()
+
+        detail_serializer = RegistrationGroupSerializer(registration_group)
+        return Response(detail_serializer.data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a specific registration group
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class LeadTagViewSet(viewsets.ModelViewSet):
+    queryset = LeadTag.objects.all()
+    serializer_class = LeadTagSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['name']
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at', 'updated_at']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return LeadTagSerializer
+    
+    def list(self, request, *args, **kwargs):
+        """
+        List lead tags with optional filtering
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page or queryset, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve a specific lead tag
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new lead tag
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead_tag = serializer.save()
+
+        detail_serializer = LeadTagSerializer(lead_tag)
+        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update a specific lead tag
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead_tag = serializer.save()
+
+        detail_serializer = LeadTagSerializer(lead_tag)
+        return Response(detail_serializer.data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a specific lead tag
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class SponsorshipTypeViewSet(viewsets.ModelViewSet):
+    queryset = SponsorshipType.objects.all()
+    serializer_class = SponsorshipTypeSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['name']
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at', 'updated_at']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return SponsorshipTypeSerializer
+    
+    def list(self, request, *args, **kwargs):
+        """
+        List sponsorship types with optional filtering
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page or queryset, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve a specific sponsorship type
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new sponsorship type
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        sponsorship_type = serializer.save()
+
+        detail_serializer = SponsorshipTypeSerializer(sponsorship_type)
+        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update a specific sponsorship type
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        sponsorship_type = serializer.save()
+
+        detail_serializer = SponsorshipTypeSerializer(sponsorship_type)
+        return Response(detail_serializer.data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a specific sponsorship type
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)

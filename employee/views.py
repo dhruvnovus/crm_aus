@@ -14,6 +14,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiPara
 from drf_spectacular.types import OpenApiTypes
 
 from .models import Employee, EmergencyContact, EmployeeHistory, PasswordResetToken
+from django.contrib.auth.models import User
 from .serializers import (
     EmployeeListSerializer,
     EmployeeDetailSerializer,
@@ -237,8 +238,23 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             employee = serializer.save()
             
-            # Generate JWT tokens for registration
-            refresh = RefreshToken.for_user(employee)
+            # Create/sync Django auth user and issue JWT
+            raw_password = request.data.get('password')
+            user, created = User.objects.get_or_create(
+                username=employee.email,
+                defaults={
+                    'email': employee.email,
+                    'first_name': employee.first_name,
+                    'last_name': employee.last_name,
+                    'is_active': True,
+                }
+            )
+            if raw_password:
+                user.set_password(raw_password)
+            user.is_active = True
+            user.save()
+
+            refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
             
             # Prepare registration response data
@@ -304,8 +320,23 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             employee = serializer.save()
             
-            # Generate JWT tokens for registration
-            refresh = RefreshToken.for_user(employee)
+            # Create/sync Django auth user and issue JWT
+            raw_password = request.data.get('password')
+            user, created = User.objects.get_or_create(
+                username=employee.email,
+                defaults={
+                    'email': employee.email,
+                    'first_name': employee.first_name,
+                    'last_name': employee.last_name,
+                    'is_active': True,
+                }
+            )
+            if raw_password:
+                user.set_password(raw_password)
+            user.is_active = True
+            user.save()
+
+            refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
             
             # Prepare registration response data
@@ -724,13 +755,28 @@ def login_user(request):
         except Employee.DoesNotExist:
             employee = None
         if employee:
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(employee)
+            # Ensure a corresponding Django auth user exists and is synced
+            user, _ = User.objects.get_or_create(
+                username=employee.email,
+                defaults={
+                    'email': employee.email,
+                    'first_name': employee.first_name,
+                    'last_name': employee.last_name,
+                    'is_active': True,
+                }
+            )
+            if not user.check_password(password):
+                user.set_password(password)
+                user.is_active = True
+                user.save()
+
+            # Generate JWT tokens for Django auth user
+            refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
             
             # Prepare user data
             user_data = {
-                "user_id": employee.id,
+                "user_id": user.id,
                 "name": employee.full_name,
                 "email": employee.email
             }
@@ -942,31 +988,63 @@ def change_password(request):
     if serializer.is_valid():
         current_password = serializer.validated_data['current_password']
         new_password = serializer.validated_data['new_password']
-        
-        # Get the authenticated employee
+
+        # Resolve the authenticated Django User robustly
+        auth_user = None
         try:
-            employee = Employee.objects.get(id=request.user.id)
-            
-            # Verify current password
-            if not employee.check_password(current_password):
-                return Response({
-                    "success": False,
-                    "message": "Current password is incorrect."
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Update password
-            employee.set_password(new_password)
-            
-            return Response({
-                "success": True,
-                "message": "Password changed successfully."
-            }, status=status.HTTP_200_OK)
-            
-        except Employee.DoesNotExist:
+            # Most common: TokenUser/User with id
+            user_id = getattr(request.user, 'id', None) or getattr(request.user, 'user_id', None)
+            if user_id:
+                auth_user = User.objects.filter(id=user_id).first()
+            # Fallbacks
+            if not auth_user:
+                username = getattr(request.user, 'username', None)
+                if username:
+                    auth_user = User.objects.filter(username=username).first()
+            if not auth_user:
+                email = getattr(request.user, 'email', None)
+                if email:
+                    auth_user = User.objects.filter(email=email).first()
+        except Exception:
+            auth_user = None
+
+        if not auth_user:
             return Response({
                 "success": False,
-                "message": "User not found."
+                "message": "Authenticated user not found."
             }, status=status.HTTP_404_NOT_FOUND)
+
+        # Verify current password
+        if not auth_user.check_password(current_password):
+            return Response({
+                "success": False,
+                "message": "Current password is incorrect."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update Django user password
+        try:
+            auth_user.set_password(new_password)
+            auth_user.save()
+        except Exception:
+            return Response({
+                "success": False,
+                "message": "Failed to update password."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Sync Employee password (by email)
+        try:
+            if auth_user.email:
+                employee = Employee.objects.filter(email=auth_user.email).first()
+                if employee:
+                    employee.set_password(new_password)
+        except Exception:
+            # Ignore sync errors; core password already changed
+            pass
+
+        return Response({
+            "success": True,
+            "message": "Password changed successfully."
+        }, status=status.HTTP_200_OK)
     
     return Response({
         "success": False,

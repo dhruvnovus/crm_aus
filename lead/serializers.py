@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Lead, LeadHistory
+from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType  
 
 
 class LeadListSerializer(serializers.ModelSerializer):
@@ -32,26 +32,20 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     """
     Serializer for Lead detail view (all fields)
     """
-    full_name = serializers.ReadOnlyField()
-    display_name = serializers.ReadOnlyField()
-    status_display = serializers.ReadOnlyField()
-    title_display = serializers.CharField(source='get_title_display', read_only=True)
-    lead_type_display = serializers.CharField(source='get_lead_type_display', read_only=True)
-    intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
+    # full_name = serializers.ReadOnlyField()
+    # display_name = serializers.ReadOnlyField()
+    # status_display = serializers.ReadOnlyField()
+    # title_display = serializers.CharField(source='get_title_display', read_only=True)
+    # lead_type_display = serializers.CharField(source='get_lead_type_display', read_only=True)
+    # intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
     tag_list = serializers.ReadOnlyField()
     custom_email_list = serializers.ReadOnlyField()
     
     class Meta:
         model = Lead
         fields = [
-            'id', 'title', 'title_display', 'first_name', 'last_name', 'full_name',
-            'display_name', 'company_name', 'contact_number', 'email_address',
-            'custom_email_addresses', 'custom_email_list', 'address', 'event',
-            'lead_type', 'lead_type_display', 'booth_size', 'sponsorship_type',
-            'registration_groups', 'status', 'status_display', 'intensity',
-            'intensity_display', 'opportunity_price', 'tags', 'tag_list',
-            'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff',
-            'date_received', 'created_at', 'updated_at'
+            'id', 'title', 'first_name', 'last_name','company_name', 'contact_number', 'email_address', 'custom_email_addresses', 'custom_email_list', 'address', 'event',
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'date_received', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at']
 
@@ -60,6 +54,15 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for Lead create and update operations
     """
+    sponsorship_type = serializers.PrimaryKeyRelatedField(
+        queryset=SponsorshipType.objects.all(), many=True, required=False
+    )
+    registration_groups = serializers.PrimaryKeyRelatedField(
+        queryset=RegistrationGroup.objects.all(), many=True, required=False
+    )
+    tags = serializers.PrimaryKeyRelatedField(
+        queryset=LeadTag.objects.all(), many=True, required=False
+    )
     
     class Meta:
         model = Lead
@@ -160,3 +163,18 @@ class LeadHistorySerializer(serializers.ModelSerializer):
             'id', 'lead', 'lead_display', 'action', 'changed_by', 'changes', 'timestamp'
         ]
         read_only_fields = ['id', 'timestamp']
+
+class RegistrationGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegistrationGroup
+        fields = ['id', 'name', 'created_at', 'updated_at']
+
+class LeadTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeadTag
+        fields = ['id', 'name', 'created_at', 'updated_at']
+
+class SponsorshipTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SponsorshipType
+        fields = ['id', 'name', 'created_at', 'updated_at']

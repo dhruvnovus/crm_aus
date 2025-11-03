@@ -1,3 +1,4 @@
+#models file
 from django.db import models
 from django.core.validators import RegexValidator
 from django.utils import timezone
@@ -108,17 +109,17 @@ class Lead(models.Model):
         null=True,
         help_text="Booth size preference"
     )
-    sponsorship_type = models.CharField(
-        max_length=100,
+    sponsorship_type = models.ManyToManyField(
+        'SponsorshipType',
         blank=True,
-        null=True,
-        help_text="Type of sponsorship"
+        related_name='leads',
+        help_text="Selected sponsorship type"
     )
-    registration_groups = models.CharField(
-        max_length=200,
+    registration_groups = models.ManyToManyField(
+        'RegistrationGroup',
         blank=True,
-        null=True,
-        help_text="Registration groups"
+        related_name='leads',
+        help_text="Selected registration group"
     )
     
     # Lead Management
@@ -141,11 +142,11 @@ class Lead(models.Model):
         null=True,
         help_text="Opportunity price/value"
     )
-    tags = models.CharField(
-        max_length=500,
+    tags = models.ManyToManyField(
+        'LeadTag',
         blank=True,
-        null=True,
-        help_text="Tags (comma-separated)"
+        related_name='leads',
+        help_text="Selected lead tag"
     )
     
     # Lead Source
@@ -203,11 +204,8 @@ class Lead(models.Model):
     
     @property
     def tag_list(self):
-        """Return tags as a list"""
-        if self.tags:
-            return [tag.strip() for tag in self.tags.split(',') if tag.strip()]
-        return []
-
+        """Return tags as a list of names"""
+        return [t.name for t in self.tags.all()]
 
 class LeadHistory(models.Model):
     """
@@ -246,3 +244,67 @@ class LeadHistory(models.Model):
         if self.custom_email_addresses:
             return [email.strip() for email in self.custom_email_addresses.split(',') if email.strip()]
         return []
+
+
+class RegistrationGroup(models.Model):
+    """
+    Registration groups for leads
+    """
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Name of the registration group"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'registration_groups'
+        ordering = ['name']
+        verbose_name = 'Registration Group'
+        verbose_name_plural = 'Registration Groups'
+
+    def __str__(self):
+        return self.name
+
+class LeadTag(models.Model):
+    """
+    Tags for leads
+    """
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Name of the tag"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'lead_tags'
+        ordering = ['name']
+        verbose_name = 'Lead Tag'
+        verbose_name_plural = 'Lead Tags'
+
+    def __str__(self):
+        return self.name
+
+class SponsorshipType(models.Model):
+    """
+    Sponsorship types for leads
+    """
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Name of the sponsorship type"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'sponsorship_types'
+        ordering = ['name']
+        verbose_name = 'Sponsorship Type'
+        verbose_name_plural = 'Sponsorship Types'
+
+    def __str__(self):
+        return self.name
