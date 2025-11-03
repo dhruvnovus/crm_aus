@@ -11,6 +11,13 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # First, clear any problematic data in the CharFields using raw SQL
+        # This sets all string values to NULL before converting to ForeignKey
+        migrations.RunSQL(
+            sql="UPDATE leads SET registration_groups = NULL, sponsorship_type = NULL, tags = NULL;",
+            reverse_sql=migrations.RunSQL.noop,
+        ),
+        # Then convert CharField to ForeignKey
         migrations.AlterField(
             model_name='lead',
             name='registration_groups',

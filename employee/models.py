@@ -200,6 +200,21 @@ class Employee(models.Model):
         else:
             return "Inactive"
     
+    @property
+    def is_authenticated(self):
+        """Always return True for authenticated Employee instances"""
+        return True
+    
+    @property
+    def is_anonymous(self):
+        """Always return False for Employee instances"""
+        return False
+    
+    @property
+    def username(self):
+        """Return email as username for compatibility with DRF"""
+        return self.email
+    
     def set_password(self, raw_password):
         """Set the password for the employee"""
         self.password = make_password(raw_password)

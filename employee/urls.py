@@ -9,7 +9,8 @@ from .views import (
 )
 
 # Create a router and register our viewsets with it
-router = DefaultRouter()
+# Use default trailing_slash=True to accept URLs with trailing slashes
+router = DefaultRouter(trailing_slash=True)
 router.register(r'employees', EmployeeViewSet, basename='employee')
 
 # The API URLs are now determined automatically by the router
