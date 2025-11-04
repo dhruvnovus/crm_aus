@@ -1,4 +1,5 @@
 from django.db.models.signals import post_save, pre_delete
+from django.db import transaction
 from django.dispatch import receiver
 from django.contrib.auth.models import AnonymousUser
 from .models import Employee, EmployeeHistory
@@ -37,12 +38,18 @@ def employee_saved(sender, instance: Employee, created, **kwargs):
     changes = build_changes_dict(instance, created, kwargs.get('update_fields'))
     if not changes:
         return
-    EmployeeHistory.objects.create(
-        employee=instance,
-        action='create' if created else 'update',
-        changed_by=user,
-        changes=changes
-    )
+    
+    # Defer history creation to after transaction commits to avoid blocking the response
+    # This improves performance, especially for slow database connections
+    def create_history():
+        EmployeeHistory.objects.create(
+            employee=instance,
+            action='create' if created else 'update',
+            changed_by=user,
+            changes=changes
+        )
+    
+    transaction.on_commit(create_history)
 
 
 @receiver(pre_delete, sender=Employee)

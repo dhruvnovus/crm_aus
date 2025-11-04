@@ -1,3 +1,4 @@
+import logging
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -11,6 +12,8 @@ from django.http import Http404
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+
+logger = logging.getLogger('crm_aus')
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -237,12 +240,15 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         """
         Create a new Super Admin employee (Registration)
         """
+        logger.info(f"[add_super_admin] Starting registration for email: {request.data.get('email', 'unknown')}")
+        
         # Automatically set account_type to super_admin
         data = request.data.copy()
         data['account_type'] = 'super_admin'
         
         serializer = EmployeeCreateUpdateSerializer(data=data)
         if not serializer.is_valid():
+            logger.warning(f"[add_super_admin] Validation failed: {serializer.errors}")
             return Response({
                 "success": False,
                 "message": "Super Admin registration failed.",
@@ -254,9 +260,12 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         
         try:
             with transaction.atomic():
+                logger.info(f"[add_super_admin] Transaction started")
+                
                 # Save employee (this will trigger signal for EmployeeHistory)
                 # Password is already hashed by serializer's validate_password
                 employee = serializer.save()
+                logger.info(f"[add_super_admin] Employee created (ID: {employee.id})")
                 
                 # Create/sync Django auth user
                 # Note: Django User.set_password() will hash again, but this is necessary
@@ -270,11 +279,15 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                         'is_active': True,
                     }
                 )
+                logger.info(f"[add_super_admin] User {'created' if created else 'retrieved'}")
+                
                 # Set password if provided (will hash it for User model)
                 if raw_password:
                     user.set_password(raw_password)
+                
                 user.is_active = True
                 user.save()
+                logger.info(f"[add_super_admin] User saved")
 
                 # Generate JWT token (fast operation, no DB needed)
                 refresh = RefreshToken.for_user(user)
@@ -287,8 +300,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                     "data": UserResponseSerializer(employee).data
                 }
                 
+                logger.info(f"[add_super_admin] Registration completed successfully for email: {employee.email}")
                 return Response(response_data, status=status.HTTP_201_CREATED)
         except IntegrityError as e:
+            logger.error(f"[add_super_admin] IntegrityError: {str(e)}")
             # Handle database constraint violations (e.g., duplicate email)
             if 'email' in str(e).lower() or 'unique' in str(e).lower():
                 return Response({
@@ -300,6 +315,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 "error": f"Database constraint violation: {str(e)}",
             }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            logger.error(f"[add_super_admin] Exception: {str(e)}", exc_info=True)
             return Response({
                 "status": False,
                 "error": f"Registration failed: {str(e)}",
