@@ -150,12 +150,10 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
     
     def validate_email(self, value):
         """
-        Validate email uniqueness
+        Validate email uniqueness for updates only
+        For creates, let database enforce uniqueness (faster, avoids extra query)
         """
-        if self.instance is None:  # Creating new employee
-            if Employee.objects.filter(email=value).exists():
-                raise serializers.ValidationError("An employee with this email already exists.")
-        else:  # Updating existing employee
+        if self.instance is not None:  # Updating existing employee
             if Employee.objects.filter(email=value).exclude(id=self.instance.id).exists():
                 raise serializers.ValidationError("An employee with this email already exists.")
         return value
@@ -199,8 +197,13 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         
         employee = Employee.objects.create(**validated_data)
         
-        for contact_data in emergency_contacts_data:
-            EmergencyContact.objects.create(employee=employee, **contact_data)
+        # Use bulk_create for better performance instead of individual creates
+        if emergency_contacts_data:
+            contacts = [
+                EmergencyContact(employee=employee, **contact_data)
+                for contact_data in emergency_contacts_data
+            ]
+            EmergencyContact.objects.bulk_create(contacts)
         
         return employee
     

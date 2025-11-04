@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.http import Http404
 from django.core.mail import send_mail
 from django.conf import settings
@@ -288,11 +288,21 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 }
                 
                 return Response(response_data, status=status.HTTP_201_CREATED)
+        except IntegrityError as e:
+            # Handle database constraint violations (e.g., duplicate email)
+            if 'email' in str(e).lower() or 'unique' in str(e).lower():
+                return Response({
+                    "status": False,
+                    "error": "An employee with this email already exists.",
+                }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "status": False,
+                "error": f"Database constraint violation: {str(e)}",
+            }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({
-                "success": False,
-                "message": f"Registration failed: {str(e)}",
-                "errors": {}
+                "status": False,
+                "error": f"Registration failed: {str(e)}",
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @extend_schema(
