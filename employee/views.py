@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count
+from django.db import transaction
 from django.http import Http404
 from django.core.mail import send_mail
 from django.conf import settings
@@ -241,42 +242,58 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         data['account_type'] = 'super_admin'
         
         serializer = EmployeeCreateUpdateSerializer(data=data)
-        if serializer.is_valid():
-            employee = serializer.save()
-            
-            # Create/sync Django auth user and issue JWT
-            raw_password = request.data.get('password')
-            user, created = User.objects.get_or_create(
-                username=employee.email,
-                defaults={
-                    'email': employee.email,
-                    'first_name': employee.first_name,
-                    'last_name': employee.last_name,
-                    'is_active': True,
-                }
-            )
-            if raw_password:
-                user.set_password(raw_password)
-            user.is_active = True
-            user.save()
-
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-            
-            # Prepare registration response data
-            response_data = {
-                "success": True,
-                "message": "Super Admin registration successful.",
-                "data": UserResponseSerializer(employee).data
-            }
-            
-            return Response(response_data, status=status.HTTP_201_CREATED)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "message": "Super Admin registration failed.",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        return Response({
-            "success": False,
-            "message": "Super Admin registration failed.",
-            "errors": serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        # Use transaction to batch all database operations for better performance
+        raw_password = request.data.get('password')
+        
+        try:
+            with transaction.atomic():
+                # Save employee (this will trigger signal for EmployeeHistory)
+                # Password is already hashed by serializer's validate_password
+                employee = serializer.save()
+                
+                # Create/sync Django auth user
+                # Note: Django User.set_password() will hash again, but this is necessary
+                # as User model uses different password format (includes algorithm identifier)
+                user, created = User.objects.get_or_create(
+                    username=employee.email,
+                    defaults={
+                        'email': employee.email,
+                        'first_name': employee.first_name,
+                        'last_name': employee.last_name,
+                        'is_active': True,
+                    }
+                )
+                # Set password if provided (will hash it for User model)
+                if raw_password:
+                    user.set_password(raw_password)
+                user.is_active = True
+                user.save()
+
+                # Generate JWT token (fast operation, no DB needed)
+                refresh = RefreshToken.for_user(user)
+                access_token = refresh.access_token
+                
+                # Prepare registration response data
+                response_data = {
+                    "success": True,
+                    "message": "Super Admin registration successful.",
+                    "data": UserResponseSerializer(employee).data
+                }
+                
+                return Response(response_data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({
+                "success": False,
+                "message": f"Registration failed: {str(e)}",
+                "errors": {}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @extend_schema(
         summary="Create Sales Staff employee (Registration)",
