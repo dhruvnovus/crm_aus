@@ -1,4 +1,4 @@
-setuptools
+setuptools<81
 asgiref==3.10.0
 Django==4.2.25
 djangorestframework==3.16.1
