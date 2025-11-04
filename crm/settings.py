@@ -89,20 +89,19 @@ WSGI_APPLICATION = 'crm.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': os.getenv('ENGINE'),
-        'NAME': os.getenv('NAME'),
-        'USER': os.getenv('USER'),
-        'PASSWORD': os.getenv('PASSWORD'),
-        'HOST': os.getenv('HOST'),
-        'PORT': os.getenv('PORT'),
+        'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.mysql'),
+        'NAME': os.getenv('DB_NAME', 'crm_aus'),
+        'USER': os.getenv('DB_USER', 'root'),
+        # 'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        # 'HOST': os.getenv('DB_HOST', '127.0.0.1'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'Novuscode123'),
+        'HOST': os.getenv('DB_HOST', 'all-database.cgn118uneswh.us-east-2.rds.amazonaws.com'),
+        'PORT': os.getenv('DB_PORT', '3306'),
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'connect_timeout': 10,
         },
-        'CONN_MAX_AGE': 600,  # Reuse database connections for 10 minutes
     }
 }
-
 
 
 # Password validation
