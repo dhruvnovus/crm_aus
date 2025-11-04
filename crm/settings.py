@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'lead',
     'dashboard',
     'customers',
+    'task',
 ]
 
 MIDDLEWARE = [
@@ -103,6 +104,15 @@ DATABASES = {
         },
     }
 }
+
+# Switch to lightweight sqlite when running tests locally by setting DJANGO_TEST=1
+if os.getenv('DJANGO_TEST') == '1':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
 
 
 # Password validation
@@ -188,6 +198,7 @@ SPECTACULAR_SETTINGS = {
     'TAGS': [
         {'name': 'Employees', 'description': 'Employee management operations including emergency contacts'},
         {'name': 'Leads', 'description': 'Lead management operations'},
+        {'name': 'Tasks', 'description': 'Task management operations'},
     ],
     'CONTACT': {
         'name': 'API Support',
@@ -256,7 +267,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # Email Configuration
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND')
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = os.getenv('EMAIL_PORT')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS')
