@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from .models import Task, Subtask, TaskAttachment, TaskReminder, TaskHistory
 from employee.models import Employee
@@ -39,10 +40,21 @@ class SubtaskSerializer(serializers.ModelSerializer):
 
 
 class TaskAttachmentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    
     class Meta:
         model = TaskAttachment
-        fields = ['id', 'filename', 'content_type', 'data_base64', 'uploaded_at']
-        read_only_fields = ['uploaded_at']
+        fields = ['id', 'file', 'filename', 'content_type', 'file_size', 'file_url', 'uploaded_at']
+        read_only_fields = ['uploaded_at', 'file_size', 'file_url']
+        
+    def get_file_url(self, obj):
+        """Return the URL to access the file"""
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
 
 
 class TaskReminderSerializer(serializers.ModelSerializer):
@@ -54,7 +66,13 @@ class TaskReminderSerializer(serializers.ModelSerializer):
 
 class TaskSerializer(serializers.ModelSerializer):
     subtasks = SubtaskSerializer(many=True, required=False)
-    attachments = TaskAttachmentSerializer(many=True, required=False)
+    attachments = TaskAttachmentSerializer(many=True, required=False, read_only=True)
+    files = serializers.ListField(
+        child=serializers.FileField(),
+        write_only=True,
+        required=False,
+        help_text='List of files to attach to this task'
+    )
     reminders = TaskReminderSerializer(many=True, required=False)
     assigned_to_name = serializers.SerializerMethodField(read_only=True)
     # Accept multiple time formats including ISO with trailing 'Z' and 12-hour clock
@@ -67,7 +85,7 @@ class TaskSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'assigned_to', 'assigned_to_name',
             'priority', 'status', 'due_date', 'due_time', 'is_deleted',
-            'created_at', 'updated_at', 'subtasks', 'attachments', 'reminders'
+            'created_at', 'updated_at', 'subtasks', 'attachments', 'files', 'reminders'
         ]
         read_only_fields = ['is_deleted', 'created_at', 'updated_at', 'assigned_to_name']
 
@@ -76,23 +94,93 @@ class TaskSerializer(serializers.ModelSerializer):
             return obj.assigned_to.full_name
         return None
 
+    def to_internal_value(self, data):
+        """
+        Parse JSON strings from multipart/form-data for nested fields.
+        When using multipart/form-data, nested JSON structures come as strings.
+        """
+        # Handle QueryDict (from multipart/form-data) or regular dict
+        if hasattr(data, 'getlist'):
+            # QueryDict - convert to regular dict, handling multiple values
+            data_dict = {}
+            for key in data.keys():
+                value = data.getlist(key)
+                if len(value) == 1:
+                    data_dict[key] = value[0]
+                else:
+                    data_dict[key] = value
+        else:
+            # Regular dict - create a copy
+            data_dict = data.copy() if hasattr(data, 'copy') else dict(data)
+        
+        # Parse subtasks if it's a string (JSON)
+        if 'subtasks' in data_dict:
+            subtasks_value = data_dict.get('subtasks')
+            if isinstance(subtasks_value, str):
+                try:
+                    data_dict['subtasks'] = json.loads(subtasks_value)
+                except (json.JSONDecodeError, TypeError):
+                    # If parsing fails, pass it through and let the serializer handle validation
+                    pass
+        
+        # Parse reminders if it's a string (JSON)
+        if 'reminders' in data_dict:
+            reminders_value = data_dict.get('reminders')
+            if isinstance(reminders_value, str):
+                try:
+                    parsed = json.loads(reminders_value)
+                    # If it's a single dict, wrap it in a list
+                    if isinstance(parsed, dict):
+                        data_dict['reminders'] = [parsed]
+                    else:
+                        data_dict['reminders'] = parsed
+                except (json.JSONDecodeError, TypeError):
+                    # If parsing fails, pass it through and let the serializer handle validation
+                    pass
+            elif isinstance(reminders_value, dict):
+                # If it's already a dict (not a string), wrap it in a list
+                data_dict['reminders'] = [reminders_value]
+        
+        # Remove 'files' from data_dict to avoid validation issues
+        # Files will be handled separately from request.FILES in the view
+        if 'files' in data_dict:
+            del data_dict['files']
+        
+        return super().to_internal_value(data_dict)
+
     def create(self, validated_data):
         subtasks_data = validated_data.pop('subtasks', [])
-        attachments_data = validated_data.pop('attachments', [])
+        files_data = validated_data.pop('files', None)  # Will be passed from view
         reminders_data = validated_data.pop('reminders', [])
         task = Task.objects.create(**validated_data)
-        normalized = self._normalize_subtasks(subtasks_data, task.id)
-        for index, st in enumerate(normalized):
-            Subtask.objects.create(parent_task=task, child_task_id=st['child_task_id'], sort_order=st.get('sort_order', index))
-        for at in attachments_data:
-            TaskAttachment.objects.create(task=task, **at)
-        for rm in reminders_data:
-            TaskReminder.objects.create(task=task, **rm)
+        
+        # Create subtasks
+        if subtasks_data:
+            normalized = self._normalize_subtasks(subtasks_data, task.id)
+            for index, st in enumerate(normalized):
+                Subtask.objects.create(parent_task=task, child_task_id=st['child_task_id'], sort_order=st.get('sort_order', index))
+        
+        # Create attachments from uploaded files (passed from view via context)
+        files_data = getattr(self, 'context', {}).get('files', [])
+        if files_data:
+            for uploaded_file in files_data:
+                TaskAttachment.objects.create(
+                    task=task,
+                    file=uploaded_file,
+                    filename=uploaded_file.name
+                )
+        
+        # Create reminders
+        if reminders_data:
+            for rm in reminders_data:
+                TaskReminder.objects.create(task=task, **rm)
+        
+        # Refresh from database to get related objects
+        task.refresh_from_db()
         return task
 
     def update(self, instance, validated_data):
         subtasks_data = validated_data.pop('subtasks', None)
-        attachments_data = validated_data.pop('attachments', None)
         reminders_data = validated_data.pop('reminders', None)
 
         for attr, value in validated_data.items():
@@ -105,10 +193,15 @@ class TaskSerializer(serializers.ModelSerializer):
             for index, st in enumerate(normalized):
                 Subtask.objects.create(parent_task=instance, child_task_id=st['child_task_id'], sort_order=st.get('sort_order', index))
 
-        if attachments_data is not None:
-            instance.attachments.all().delete()
-            for at in attachments_data:
-                TaskAttachment.objects.create(task=instance, **at)
+        # Add new attachments from uploaded files (passed from view via context)
+        files_data = getattr(self, 'context', {}).get('files', None)
+        if files_data is not None:
+            for uploaded_file in files_data:
+                TaskAttachment.objects.create(
+                    task=instance,
+                    file=uploaded_file,
+                    filename=uploaded_file.name
+                )
 
         if reminders_data is not None:
             instance.reminders.all().delete()

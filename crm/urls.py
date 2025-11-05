@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/', include('dashboard.urls')),
     path('api/', include('customers.urls')),
     path('api/', include('task.urls')),
+    path('api/', include('notifications.urls')),
     
     # Swagger UI URLs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
@@ -36,6 +37,6 @@ urlpatterns = [
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
-# Serve media files during development (not needed for Base64 storage)
-# if settings.DEBUG:
-#     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Serve media files during development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

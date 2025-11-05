@@ -68,7 +68,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     ViewSet for Lead CRUD operations
     Provides: list, create, retrieve, update, partial_update, destroy
     """
-    queryset = Lead.objects.all()
+    queryset = Lead.objects.select_related('assigned_sales_staff').all()
     pagination_class = LeadPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = [
@@ -107,13 +107,32 @@ class LeadViewSet(viewsets.ModelViewSet):
         else:
             return LeadDetailSerializer
     
+    def perform_create(self, serializer):
+        """Create lead and send notification if assigned"""
+        lead = serializer.save()
+        
+        # Create notification if lead is assigned during creation
+        if lead.assigned_sales_staff:
+            from notifications.signals import create_lead_assignment_notification
+            create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+    
+    def perform_update(self, serializer):
+        """Update lead and send notification if assignment changed"""
+        old_assigned = serializer.instance.assigned_sales_staff
+        lead = serializer.save()
+        
+        # Create notification if assignment changed
+        if lead.assigned_sales_staff and old_assigned != lead.assigned_sales_staff:
+            from notifications.signals import create_lead_assignment_notification
+            create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+    
     def get_queryset(self):
         """
         Optionally restricts the returned leads by filtering against
         query parameters in the URL.
         """
-        # Filter out deleted records by default
-        queryset = Lead.objects.filter(is_deleted=False)
+        # Filter out deleted records by default and optimize with select_related
+        queryset = Lead.objects.select_related('assigned_sales_staff').filter(is_deleted=False)
         
         # Filter by status category
         status_category = self.request.query_params.get('status_category', None)
@@ -365,28 +384,71 @@ class LeadViewSet(viewsets.ModelViewSet):
     
     @extend_schema(
         summary="Assign lead to sales staff",
-        description="Assign a lead to a specific sales staff member",
+        description="Assign a lead to a specific sales staff member. Requires employee_id in request body.",
         tags=["Leads"],
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'employee_id': {
+                        'type': 'integer',
+                        'description': 'ID of the employee to assign the lead to'
+                    }
+                },
+                'required': ['employee_id']
+            }
+        }
     )
     @action(detail=True, methods=['post'])
     def assign_sales_staff(self, request, pk=None):
         """
         Assign lead to sales staff
+        Requires only employee_id in request body
         """
-        lead = self.get_object()
-        sales_staff = request.data.get('assigned_sales_staff')
-        
-        if not sales_staff:
+        try:
+            lead = self.get_object()
+            employee_id = request.data.get('employee_id')
+            
+            if not employee_id:
+                return Response(
+                    {"status": False, "error": "employee_id is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                from employee.models import Employee
+                employee = Employee.objects.get(id=employee_id, is_deleted=False)
+            except Employee.DoesNotExist:
+                return Response(
+                    {"status": False, "error": "Employee not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            old_assigned = lead.assigned_sales_staff
+            lead.assigned_sales_staff = employee
+            lead.save()
+            
+            # Create notification if assignment changed and is not empty
+            if employee and old_assigned != employee:
+                try:
+                    from notifications.signals import create_lead_assignment_notification
+                    create_lead_assignment_notification(lead, employee)
+                except Exception as e:
+                    # Log error but don't fail the assignment
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to create notification for lead assignment: {str(e)}")
+            
+            serializer = LeadDetailSerializer(lead)
+            return Response({"success": True, "message": "Lead assigned successfully", "data": serializer.data})
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in assign_sales_staff: {str(e)}", exc_info=True)
             return Response(
-                {"error": "Sales staff assignment is required."},
-                status=status.HTTP_400_BAD_REQUEST
+                {"status": False, "error": f"An error occurred while assigning lead: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        lead.assigned_sales_staff = sales_staff
-        lead.save()
-        
-        serializer = LeadDetailSerializer(lead)
-        return Response(serializer.data)
     
     @extend_schema(
         summary="Bulk import leads",
@@ -507,7 +569,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.get_lead_type_display(), lead.booth_size, sponsorship_names,
                 registration_names, lead.get_status_display(),
                 lead.get_intensity_display(), lead.opportunity_price, tag_names,
-                lead.how_did_you_hear, lead.reason_for_enquiry, lead.assigned_sales_staff,
+                lead.how_did_you_hear, lead.reason_for_enquiry, lead.assigned_sales_staff.full_name if lead.assigned_sales_staff else '',
                 lead.lead_name, lead.lead_pipeline, lead.lead_stage,
                 lead.date_received, lead.created_at, lead.updated_at
             ])

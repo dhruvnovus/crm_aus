@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'dashboard',
     'customers',
     'task',
+    'notifications',
 ]
 
 MIDDLEWARE = [
@@ -199,6 +200,7 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Employees', 'description': 'Employee management operations including emergency contacts'},
         {'name': 'Leads', 'description': 'Lead management operations'},
         {'name': 'Tasks', 'description': 'Task management operations'},
+        {'name': 'Notifications', 'description': 'Notification management operations'},
     ],
     'CONTACT': {
         'name': 'API Support',
@@ -213,9 +215,9 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# Media files settings (not needed for Base64 storage)
-# MEDIA_URL = '/media/'
-# MEDIA_ROOT = BASE_DIR / 'media'
+# Media files settings
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Security settings
 SECURE_SSL_REDIRECT = False  # Set to True in production

@@ -68,16 +68,40 @@ class Subtask(models.Model):
         return f"Subtask(parent={self.parent_task_id}, child={self.child_task_id})"
 
 
+def task_attachment_upload_path(instance, filename):
+    """Generate upload path for task attachments: task_attachments/task_{task_id}/{filename}"""
+    return f'task_attachments/task_{instance.task_id}/{filename}'
+
+
 class TaskAttachment(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to=task_attachment_upload_path, blank=True, null=True)
     filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100, blank=True, null=True)
-    data_base64 = models.TextField()
+    file_size = models.PositiveIntegerField(blank=True, null=True, help_text='File size in bytes')
+    # Legacy field for backward compatibility during migration - can be removed after migration
+    data_base64 = models.TextField(blank=True, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'task_attachments'
         ordering = ['-uploaded_at']
+
+    def save(self, *args, **kwargs):
+        # Auto-populate filename from file if not provided
+        if self.file and not self.filename:
+            self.filename = self.file.name
+        # Auto-populate content_type from file if not provided
+        if self.file and not self.content_type:
+            import mimetypes
+            self.content_type, _ = mimetypes.guess_type(self.file.name)
+        # Auto-populate file_size
+        if self.file and not self.file_size:
+            try:
+                self.file_size = self.file.size
+            except (OSError, AttributeError):
+                pass
+        super().save(*args, **kwargs)
 
 
 class TaskReminder(models.Model):
@@ -119,5 +143,3 @@ class TaskHistory(models.Model):
 
     def __str__(self):
         return f"TaskHistory(task_id={self.task_id}, action={self.action}, at={self.timestamp})"
-
-

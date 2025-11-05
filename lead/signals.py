@@ -6,11 +6,16 @@ from datetime import datetime, date
 
 
 def _serialize_value(value):
+    if value is None:
+        return None
     if isinstance(value, Decimal):
         # convert Decimal to string to preserve precision in JSON
         return str(value)
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    # Handle model instances (e.g., ForeignKey fields like assigned_sales_staff)
+    if hasattr(value, 'pk'):
+        return value.pk
     return value
 
 

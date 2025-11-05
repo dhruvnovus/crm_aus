@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType  
+from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType
+from employee.models import Employee
+from employee.serializers import EmployeeListSerializer, EmployeeDetailSerializer  
+from customers.models import Customer
+from django.db import transaction
+from django.contrib.auth.hashers import make_password
+import uuid
 
 
 class LeadListSerializer(serializers.ModelSerializer):
@@ -13,6 +19,7 @@ class LeadListSerializer(serializers.ModelSerializer):
     intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
     tag_list = serializers.ReadOnlyField()
     custom_email_list = serializers.ReadOnlyField()
+    assigned_sales_staff = EmployeeListSerializer(read_only=True)
     
     class Meta:
         model = Lead
@@ -42,6 +49,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     # intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
     tag_list = serializers.ReadOnlyField()
     custom_email_list = serializers.ReadOnlyField()
+    assigned_sales_staff = EmployeeDetailSerializer(read_only=True)
     
     class Meta:
         model = Lead
@@ -65,6 +73,11 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
     tags = serializers.PrimaryKeyRelatedField(
         queryset=LeadTag.objects.all(), many=True, required=False
     )
+    assigned_sales_staff = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.filter(is_deleted=False), required=False, allow_null=True
+    )
+    employee_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    customer_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     
     class Meta:
         model = Lead
@@ -73,7 +86,7 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
             'email_address', 'custom_email_addresses', 'address', 'event',
             'lead_type', 'booth_size', 'sponsorship_type', 'registration_groups',
             'status', 'intensity', 'opportunity_price', 'tags', 'how_did_you_hear',
-            'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage'
+            'reason_for_enquiry', 'assigned_sales_staff', 'employee_id', 'customer_id', 'lead_name', 'lead_pipeline', 'lead_stage'
         ]
         extra_kwargs = {
             'first_name': {'required': True},
@@ -81,19 +94,30 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
             'company_name': {'required': True},
             'contact_number': {'required': True},
             'email_address': {'required': True},
+            'assigned_sales_staff': {'required': False, 'allow_null': True},
         }
+    
+    def validate(self, attrs):
+        """
+        Handle employee_id mapping to assigned_sales_staff
+        employee_id takes precedence over assigned_sales_staff if both are provided
+        """
+        employee_id = attrs.pop('employee_id', None)
+        if employee_id is not None:
+            # If employee_id is provided, use it to set assigned_sales_staff (takes precedence)
+            try:
+                employee = Employee.objects.get(id=employee_id, is_deleted=False)
+                attrs['assigned_sales_staff'] = employee
+            except Employee.DoesNotExist:
+                raise serializers.ValidationError({"employee_id": f"Employee with id {employee_id} not found."})
+        # If employee_id is not provided, keep assigned_sales_staff as is (or None if not provided)
+        return attrs
     
     def validate_email_address(self, value):
         """
-        Validate email uniqueness
+        Normalize email address; duplicates are allowed by requirement.
         """
-        if self.instance is None:  # Creating new lead
-            if Lead.objects.filter(email_address=value).exists():
-                raise serializers.ValidationError("A lead with this email already exists.")
-        else:  # Updating existing lead
-            if Lead.objects.filter(email_address=value).exclude(id=self.instance.id).exists():
-                raise serializers.ValidationError("A lead with this email already exists.")
-        return value
+        return (value or '').strip().lower()
     
     def validate_custom_email_addresses(self, value):
         """
@@ -106,6 +130,56 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
                 if '@' not in email or '.' not in email:
                     raise serializers.ValidationError(f"Invalid email format: {email}")
         return value
+    
+    def create(self, validated_data):
+        sponsorship_types = validated_data.pop('sponsorship_type', [])
+        registration_groups = validated_data.pop('registration_groups', [])
+        tags = validated_data.pop('tags', [])
+        # Remove write-only passthrough field so it is not sent to Lead.create
+        customer_id = validated_data.pop('customer_id', None)
+
+        with transaction.atomic():
+            # Attach or create customer
+            if customer_id:
+                try:
+                    customer = Customer.objects.get(id=customer_id, is_deleted=False)
+                except Customer.DoesNotExist:
+                    raise serializers.ValidationError({"customer_id": f"Customer with id {customer_id} not found."})
+            else:
+                # Try to find by email; otherwise create a minimal customer from lead data
+                email = (validated_data.get('email_address') or '').strip().lower()
+                customer = None
+                if email:
+                    customer = Customer.objects.filter(email=email, is_deleted=False).first()
+                if customer is None:
+                    customer = Customer.objects.create(
+                        first_name=validated_data.get('first_name', ''),
+                        last_name=validated_data.get('last_name', ''),
+                        company_name=validated_data.get('company_name', ''),
+                        mobile_phone=validated_data.get('contact_number', ''),
+                        email=email,
+                        address=validated_data.get('address'),
+                        type=(validated_data.get('lead_type') if validated_data.get('lead_type') in ['exhibitor', 'sponsor'] else 'exhibitor'),
+                        event=validated_data.get('event'),
+                        password=make_password(uuid.uuid4().hex),
+                    )
+
+            # create lead with linked customer
+            lead = Lead.objects.create(customer=customer, **validated_data)
+
+            # Fallback: if for any reason FK didn't persist, set and save
+            if not lead.customer_id and customer:
+                lead.customer = customer
+                lead.save(update_fields=['customer'])
+
+            if sponsorship_types:
+                lead.sponsorship_type.set(sponsorship_types)
+            if registration_groups:
+                lead.registration_groups.set(registration_groups)
+            if tags:
+                lead.tags.set(tags)
+
+        return lead
 
 
 class LeadStatsSerializer(serializers.Serializer):
@@ -144,16 +218,11 @@ class LeadBulkImportSerializer(serializers.Serializer):
         """
         if len(value) > 1000:  # Limit bulk import to 1000 leads
             raise serializers.ValidationError("Cannot import more than 1000 leads at once.")
-        
-        # Check for duplicate emails in the batch
-        emails = []
-        for lead_data in value:
-            email = lead_data.get('email_address')
-            if email in emails:
-                raise serializers.ValidationError(f"Duplicate email in batch: {email}")
-            emails.append(email)
-        
+
+        # Duplicates within the batch are allowed as per requirement
         return value
+
+    # No custom create here; we validate only. Lead creation is handled by LeadCreateUpdateSerializer
 
 
 class LeadHistorySerializer(serializers.ModelSerializer):

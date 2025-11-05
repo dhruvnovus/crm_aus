@@ -2,6 +2,8 @@
 from django.db import models
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from employee.models import Employee
+from customers.models import Customer
 
 
 class Lead(models.Model):
@@ -151,6 +153,16 @@ class Lead(models.Model):
         related_name='leads',
         help_text="Selected lead tag"
     )
+
+    # Customer link
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='leads',
+        help_text="Linked customer (created or existing)"
+    )
     
     # Lead Source
     how_did_you_hear = models.CharField(
@@ -166,10 +178,12 @@ class Lead(models.Model):
     )
     
     # Assignment
-    assigned_sales_staff = models.CharField(
-        max_length=200,
+    assigned_sales_staff = models.ForeignKey(
+        Employee,
+        on_delete=models.SET_NULL,
         blank=True,
         null=True,
+        related_name='assigned_leads',
         help_text="Assigned sales staff member"
     )
 
@@ -211,6 +225,12 @@ class Lead(models.Model):
         ordering = ['-date_received']
         verbose_name = 'Lead'
         verbose_name_plural = 'Leads'
+        permissions = [
+            (
+                'can_use_duplicate_lead_email',
+                'Can create/update leads when email already exists'
+            ),
+        ]
     
     def __str__(self):
         return f"{self.first_name} {self.last_name} - {self.company_name}"
