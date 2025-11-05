@@ -113,15 +113,20 @@ class TaskSerializer(serializers.ModelSerializer):
             # Regular dict - create a copy
             data_dict = data.copy() if hasattr(data, 'copy') else dict(data)
         
-        # Parse subtasks if it's a string (JSON)
+        # Parse subtasks if provided; gracefully handle empty strings from multipart forms
         if 'subtasks' in data_dict:
             subtasks_value = data_dict.get('subtasks')
             if isinstance(subtasks_value, str):
-                try:
-                    data_dict['subtasks'] = json.loads(subtasks_value)
-                except (json.JSONDecodeError, TypeError):
-                    # If parsing fails, pass it through and let the serializer handle validation
-                    pass
+                stripped = subtasks_value.strip()
+                # Treat empty strings or explicit nulls as no subtasks
+                if stripped == '' or stripped.lower() in ('null', 'none'):
+                    data_dict['subtasks'] = []
+                else:
+                    try:
+                        data_dict['subtasks'] = json.loads(stripped)
+                    except (json.JSONDecodeError, TypeError):
+                        # If parsing fails, let the serializer handle validation
+                        pass
         
         # Parse reminders if it's a string (JSON)
         if 'reminders' in data_dict:
