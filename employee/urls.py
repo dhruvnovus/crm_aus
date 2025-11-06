@@ -13,8 +13,21 @@ from .views import (
 router = DefaultRouter(trailing_slash=True)
 router.register(r'employees', EmployeeViewSet, basename='employee')
 
+# Explicit route for emergency contacts by ID (maps to custom actions on the viewset)
+employee_contact = EmployeeViewSet.as_view({
+    'get': 'get_emergency_contact',
+    'put': 'update_emergency_contact_by_id',
+    'patch': 'update_emergency_contact_by_id',
+    'delete': 'delete_emergency_contact_by_id',
+})
+
 # The API URLs are now determined automatically by the router
 urlpatterns = [
+    # Place explicit routes BEFORE router.urls to ensure they're matched first
+    path('employees/emergency-contacts/<int:contact_id>/', employee_contact, name='employee-emergency-contact'),
+    path('employees/emergency-contacts/<int:contact_id>', employee_contact, name='employee-emergency-contact-no-slash'),
+    
+    # Router URLs (includes all ViewSet routes)
     path('', include(router.urls)),
     
     # Authentication URLs

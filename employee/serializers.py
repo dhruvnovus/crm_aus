@@ -238,14 +238,15 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         
         instance.save()
         
-        # Update emergency contacts if provided
         if emergency_contacts_data is not None:
-            # Delete existing emergency contacts
             instance.emergency_contacts.all().delete()
             
-            # Create new emergency contacts
-            for contact_data in emergency_contacts_data:
-                EmergencyContact.objects.create(employee=instance, **contact_data)
+            if emergency_contacts_data:
+                contacts = [
+                    EmergencyContact(employee=instance, **contact_data)
+                    for contact_data in emergency_contacts_data
+                ]
+                EmergencyContact.objects.bulk_create(contacts)
         
         return instance
 

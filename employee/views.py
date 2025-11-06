@@ -720,7 +720,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         description="Get a specific emergency contact by its ID",
         tags=["Employees"],
     )
-    @action(detail=False, methods=['get'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
+    @action(detail=False, methods=['get'])
     def get_emergency_contact(self, request, contact_id=None):
         """
         Get a specific emergency contact by ID (excludes deleted records)
@@ -740,7 +740,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         description="Update a specific emergency contact by its ID",
         tags=["Employees"],
     )
-    @action(detail=False, methods=['put'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
+    @action(detail=False, methods=['put', 'patch'])
     def update_emergency_contact_by_id(self, request, contact_id=None):
         """
         Update a specific emergency contact by ID (cannot update deleted records)
@@ -762,7 +762,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         description="Delete a specific emergency contact by its ID",
         tags=["Employees"],
     )
-    @action(detail=False, methods=['delete'], url_path='emergency-contacts/(?P<contact_id>[^/.]+)')
+    @action(detail=False, methods=['delete'])
     def delete_emergency_contact_by_id(self, request, contact_id=None):
         """
         Soft delete a specific emergency contact by ID (sets is_deleted=True instead of actually deleting)
