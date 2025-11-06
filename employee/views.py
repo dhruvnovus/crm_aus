@@ -428,12 +428,19 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        employee = serializer.save()
-        
-        # Return detailed employee data
-        detail_serializer = EmployeeDetailSerializer(employee)
-        return Response(detail_serializer.data)
+        if not serializer.is_valid():
+            return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            employee = serializer.save()
+            # Return detailed employee data
+            detail_serializer = EmployeeDetailSerializer(employee)
+            return Response({"status": True, "message": "Employee updated successfully", "data": detail_serializer.data})
+        except IntegrityError as e:
+            if 'email' in str(e).lower() or 'unique' in str(e).lower():
+                return Response({"status": False, "error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"status": False, "error": f"Database constraint violation: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({"status": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     
     def partial_update(self, request, *args, **kwargs):
         """

@@ -15,29 +15,29 @@ class Base64ImageField(serializers.Field):
     """
     
     def to_internal_value(self, data):
+        # Handle empty strings or None - return None to store as empty
+        if not data or (isinstance(data, str) and not data.strip()):
+            return None
+        
         # Check if this is a base64 string
         if isinstance(data, str):
-            # Check if the base64 string is in the "data:" format
+            # Extract base64 content if it's in "data:image/jpeg;base64,..." format
             if 'data:' in data and ';base64,' in data:
                 # Break out the header from the base64 content
-                header, data = data.split(';base64,')
-            
-            # Try to decode the file. Return validation error if it fails.
-            try:
-                decoded_file = base64.b64decode(data)
-            except TypeError:
-                raise serializers.ValidationError("Invalid base64 string")
-            
-            # Generate file name
-            file_name = str(uuid.uuid4())[:12]  # 12 characters are more than enough.
-            
-            # Get the file name extension
-            file_extension = self.get_file_extension(file_name, decoded_file)
-            complete_file_name = "%s.%s" % (file_name, file_extension,)
-            
-            return complete_file_name, decoded_file
+                header, base64_content = data.split(';base64,')
+                # Return the full base64 string (with data: prefix) for storage
+                return data
+            else:
+                # If it's already a plain base64 string, validate it
+                try:
+                    # Try to decode to validate it's valid base64
+                    base64.b64decode(data)
+                    # Return the base64 string as-is for storage
+                    return data
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError("Invalid base64 string")
         
-        raise serializers.ValidationError("Invalid image format")
+        raise serializers.ValidationError("Invalid image format. Expected base64 string.")
     
     def to_representation(self, value):
         # Return the base64 string if it exists, otherwise return None
@@ -139,7 +139,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['is_deleted']
         extra_kwargs = {
-            'password': {'write_only': True, 'required': True},
+            'password': {'write_only': True, 'required': False, 'allow_blank': True},
             'email': {'required': True},
             'first_name': {'required': True},
             'last_name': {'required': True},
@@ -162,9 +162,20 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         """
         Hash password before saving
         """
+        # If password is None or not provided, don't validate (allow None for updates)
+        if value is None:
+            return None
+        
+        # If password is an empty string, return None (don't update password)
+        if isinstance(value, str) and not value.strip():
+            return None
+        
+        # If password is provided and not empty, hash it
         if value:
             return make_password(value)
-        return value
+        
+        # Fallback: return None
+        return None
     
     def validate_emergency_contacts(self, value):
         """
@@ -189,12 +200,6 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         """
         emergency_contacts_data = validated_data.pop('emergency_contacts', [])
         
-        # Handle profile image Base64 data
-        profile_image_data = validated_data.get('profile_image')
-        if profile_image_data:
-            # Store the Base64 string directly in the database
-            validated_data['profile_image'] = profile_image_data
-        
         employee = Employee.objects.create(**validated_data)
         
         # Use bulk_create for better performance instead of individual creates
@@ -213,15 +218,24 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         """
         emergency_contacts_data = validated_data.pop('emergency_contacts', None)
         
-        # Handle profile image Base64 data
-        profile_image_data = validated_data.get('profile_image')
-        if profile_image_data:
-            # Store the Base64 string directly in the database
-            validated_data['profile_image'] = profile_image_data
+        # Remove password from validated_data - handle separately
+        password = validated_data.pop('password', None)
+        
+        # Handle profile_image - update if provided, otherwise keep existing
+        profile_image_data = validated_data.pop('profile_image', None)
         
         # Update employee fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        
+        # Only update password if a new one was provided
+        if password is not None:
+            instance.password = password
+        
+        # Only update profile_image if provided (None means keep existing, empty string means clear it)
+        if profile_image_data is not None:
+            instance.profile_image = profile_image_data
+        
         instance.save()
         
         # Update emergency contacts if provided
