@@ -6,7 +6,7 @@ from drf_spectacular.utils import extend_schema
 from lead.models import Lead
 from employee.models import Employee
 from .serializers import DashboardSummarySerializer
-
+from customers.models import Customer
 
 class DashboardSummaryView(APIView):
     permission_classes = [IsAuthenticated]
@@ -21,7 +21,7 @@ class DashboardSummaryView(APIView):
         base_qs = Lead.objects.filter(is_deleted=False)
 
         # Placeholder: will be replaced when Customers API is implemented
-        total_customers = 0
+        total_customers = Customer.objects.filter(is_deleted=False).count()
         active_leads = base_qs.exclude(status__in=['lost', 'withdrawn', 'converted']).count()
         signed_contracts = base_qs.filter(status='contract_signed').count()
         active_users = Employee.objects.filter(is_active=True, is_resigned=False).count()
