@@ -193,6 +193,116 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
                 lead.tags.set(tags)
 
         return lead
+    
+    def update(self, instance, validated_data):
+        """
+        Update lead and associated customer
+        """
+        sponsorship_types = validated_data.pop('sponsorship_type', None)
+        registration_groups = validated_data.pop('registration_groups', None)
+        tags = validated_data.pop('tags', None)
+        customer_id = validated_data.pop('customer_id', None)
+
+        with transaction.atomic():
+            # Update customer if lead data changed
+            if instance.customer:
+                customer = instance.customer
+                # Update customer fields from lead data if they changed
+                customer_updated = False
+                
+                if 'first_name' in validated_data and customer.first_name != validated_data.get('first_name'):
+                    customer.first_name = validated_data.get('first_name')
+                    customer_updated = True
+                
+                if 'last_name' in validated_data and customer.last_name != validated_data.get('last_name'):
+                    customer.last_name = validated_data.get('last_name')
+                    customer_updated = True
+                
+                if 'company_name' in validated_data and customer.company_name != validated_data.get('company_name'):
+                    customer.company_name = validated_data.get('company_name')
+                    customer_updated = True
+                
+                if 'contact_number' in validated_data and customer.mobile_phone != validated_data.get('contact_number'):
+                    customer.mobile_phone = validated_data.get('contact_number')
+                    customer_updated = True
+                
+                if 'email_address' in validated_data:
+                    new_email = (validated_data.get('email_address') or '').strip().lower()
+                    if customer.email != new_email and new_email:
+                        customer.email = new_email
+                        customer_updated = True
+                
+                if 'address' in validated_data and customer.address != validated_data.get('address'):
+                    customer.address = validated_data.get('address')
+                    customer_updated = True
+                
+                if 'event' in validated_data and customer.event != validated_data.get('event'):
+                    customer.event = validated_data.get('event')
+                    customer_updated = True
+                
+                if 'lead_type' in validated_data:
+                    lead_type = validated_data.get('lead_type')
+                    if lead_type in ['exhibitor', 'sponsor'] and customer.type != lead_type:
+                        customer.type = lead_type
+                        customer_updated = True
+                
+                if customer_updated:
+                    customer.save()
+            elif customer_id:
+                # If customer_id is provided, link to that customer
+                try:
+                    customer = Customer.objects.get(id=customer_id, is_deleted=False)
+                    instance.customer = customer
+                except Customer.DoesNotExist:
+                    raise serializers.ValidationError({"customer_id": f"Customer with id {customer_id} not found."})
+            else:
+                # If no customer exists, create or find one by email
+                email = (validated_data.get('email_address') or '').strip().lower()
+                if email and email != 'noemail@example.com':
+                    customer = Customer.objects.filter(email=email, is_deleted=False).first()
+                    if customer:
+                        instance.customer = customer
+                    else:
+                        # Create new customer
+                        if not email or email == 'noemail@example.com':
+                            email = f"noemail_{uuid.uuid4().hex[:8]}@example.com"
+                        try:
+                            customer = Customer.objects.create(
+                                first_name=validated_data.get('first_name', instance.first_name),
+                                last_name=validated_data.get('last_name', instance.last_name),
+                                company_name=validated_data.get('company_name', instance.company_name),
+                                mobile_phone=validated_data.get('contact_number', instance.contact_number),
+                                email=email,
+                                address=validated_data.get('address', instance.address),
+                                type=(validated_data.get('lead_type') if validated_data.get('lead_type') in ['exhibitor', 'sponsor'] else 'exhibitor'),
+                                event=validated_data.get('event', instance.event),
+                                password=make_password(uuid.uuid4().hex),
+                            )
+                            instance.customer = customer
+                        except Exception as e:
+                            if 'email' in str(e).lower() or 'unique' in str(e).lower():
+                                customer = Customer.objects.filter(email=email, is_deleted=False).first()
+                                if customer:
+                                    instance.customer = customer
+                                else:
+                                    raise serializers.ValidationError({"email": f"Customer with email {email} already exists or creation failed: {str(e)}"})
+                            else:
+                                raise
+
+            # Update lead fields
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+
+            # Update ManyToMany relationships
+            if sponsorship_types is not None:
+                instance.sponsorship_type.set(sponsorship_types)
+            if registration_groups is not None:
+                instance.registration_groups.set(registration_groups)
+            if tags is not None:
+                instance.tags.set(tags)
+
+        return instance
 
 
 class LeadStatsSerializer(serializers.Serializer):
