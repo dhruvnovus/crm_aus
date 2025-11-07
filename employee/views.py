@@ -859,6 +859,7 @@ def login_user(request):
                 "success": True,
                 "message": "Login successful.",
                 "token": str(access_token),
+                "refresh_token": str(refresh),
                 "user": user_data
             }
             
@@ -1125,3 +1126,69 @@ def change_password(request):
         "message": "Password change failed.",
         "errors": serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    summary="Refresh JWT Token",
+    description="Refresh access token using refresh token",
+    tags=["Authentication"],
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'refresh': {
+                    'type': 'string',
+                    'description': 'Refresh token'
+                }
+            },
+            'required': ['refresh']
+        }
+    },
+    responses={
+        200: {
+            'description': 'Token refreshed successfully',
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'message': {'type': 'string'},
+                'token': {'type': 'string'},
+                'refresh_token': {'type': 'string'}
+            }
+        },
+        400: AuthResponseSerializer,
+        401: AuthResponseSerializer
+    },
+    operation_id="refresh_token",
+    methods=["POST"]
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh_token(request):
+    """
+    Refresh JWT access token using refresh token
+    """
+    refresh_token_str = request.data.get('refresh')
+    
+    if not refresh_token_str:
+        return Response({
+            "success": False,
+            "message": "Refresh token is required."
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        refresh = RefreshToken(refresh_token_str)
+        access_token = refresh.access_token
+        
+        response_data = {
+            "success": True,
+            "message": "Token refreshed successfully.",
+            "token": str(access_token),
+            "refresh_token": str(refresh)
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            "success": False,
+            "message": "Invalid or expired refresh token."
+        }, status=status.HTTP_401_UNAUTHORIZED)

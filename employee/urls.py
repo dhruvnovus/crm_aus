@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     EmployeeViewSet,
     login_user,
+    refresh_token,
     forgot_password,
     reset_password,
     change_password
@@ -32,6 +33,7 @@ urlpatterns = [
     
     # Authentication URLs
     path('login/', login_user, name='login'),
+    path('refresh-token/', refresh_token, name='refresh-token'),
     path('forgot-password/', forgot_password, name='forgot-password'),
     path('reset-password/', reset_password, name='reset-password'),
     path('change-password/', change_password, name='change-password'),
