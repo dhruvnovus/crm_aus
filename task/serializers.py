@@ -1,4 +1,5 @@
 import json
+import re
 from rest_framework import serializers
 from .models import Task, Subtask, TaskAttachment, TaskReminder, TaskHistory
 from employee.models import Employee
@@ -113,8 +114,44 @@ class TaskSerializer(serializers.ModelSerializer):
             # Regular dict - create a copy
             data_dict = data.copy() if hasattr(data, 'copy') else dict(data)
         
-        # Parse subtasks if provided; gracefully handle empty strings from multipart forms
-        if 'subtasks' in data_dict:
+        # Parse bracket notation for subtasks (e.g., subtasks[0][child_task])
+        subtasks_list = []
+        subtask_keys = [k for k in data_dict.keys() if k.startswith('subtasks[')]
+        if subtask_keys:
+            # Group by index
+            subtask_dict = {}
+            for key in subtask_keys:
+                match = re.match(r'subtasks\[(\d+)\]\[(\w+)\]', key)
+                if match:
+                    index = int(match.group(1))
+                    field = match.group(2)
+                    if index not in subtask_dict:
+                        subtask_dict[index] = {}
+                    subtask_dict[index][field] = data_dict[key]
+                    # Remove from data_dict to avoid duplicate processing
+                    del data_dict[key]
+            
+            # Convert to list format
+            if subtask_dict:
+                for index in sorted(subtask_dict.keys()):
+                    subtask_item = subtask_dict[index]
+                    # Convert sort_order to int if present, default to index
+                    if 'sort_order' in subtask_item:
+                        try:
+                            sort_order = int(subtask_item['sort_order'])
+                            # Handle invalid sort_order values
+                            if sort_order < 0 or sort_order > 10000:
+                                sort_order = index
+                            subtask_item['sort_order'] = sort_order
+                        except (ValueError, TypeError):
+                            subtask_item['sort_order'] = index
+                    else:
+                        subtask_item['sort_order'] = index
+                    subtasks_list.append(subtask_item)
+                data_dict['subtasks'] = subtasks_list
+        
+        # Parse subtasks if provided as JSON string; gracefully handle empty strings from multipart forms
+        elif 'subtasks' in data_dict:
             subtasks_value = data_dict.get('subtasks')
             if isinstance(subtasks_value, str):
                 stripped = subtasks_value.strip()
@@ -123,13 +160,54 @@ class TaskSerializer(serializers.ModelSerializer):
                     data_dict['subtasks'] = []
                 else:
                     try:
-                        data_dict['subtasks'] = json.loads(stripped)
-                    except (json.JSONDecodeError, TypeError):
-                        # If parsing fails, let the serializer handle validation
-                        pass
+                        parsed = json.loads(stripped)
+                        # Ensure it's a list
+                        if isinstance(parsed, list):
+                            data_dict['subtasks'] = parsed
+                        elif isinstance(parsed, dict):
+                            # Single object, wrap in list
+                            data_dict['subtasks'] = [parsed]
+                        else:
+                            # Invalid format, raise clear error
+                            raise serializers.ValidationError({
+                                'subtasks': f'Invalid format. Expected JSON array like [{{"child_task": 10, "sort_order": 0}}], but got: {stripped[:50]}...'
+                            })
+                    except json.JSONDecodeError as e:
+                        # Invalid JSON, provide helpful error
+                        raise serializers.ValidationError({
+                            'subtasks': f'Invalid JSON format. Please use valid JSON array format: [{{"child_task": 10, "sort_order": 0}}]. Error: {str(e)}'
+                        })
+                    except Exception as e:
+                        # Other errors
+                        raise serializers.ValidationError({
+                            'subtasks': f'Error parsing subtasks: {str(e)}'
+                        })
+        
+        # Parse bracket notation for reminders (e.g., reminders[0][remind_at])
+        reminders_list = []
+        reminder_keys = [k for k in data_dict.keys() if k.startswith('reminders[')]
+        if reminder_keys:
+            # Group by index
+            reminder_dict = {}
+            for key in reminder_keys:
+                match = re.match(r'reminders\[(\d+)\]\[(\w+)\]', key)
+                if match:
+                    index = int(match.group(1))
+                    field = match.group(2)
+                    if index not in reminder_dict:
+                        reminder_dict[index] = {}
+                    reminder_dict[index][field] = data_dict[key]
+                    # Remove from data_dict to avoid duplicate processing
+                    del data_dict[key]
+            
+            # Convert to list format
+            if reminder_dict:
+                for index in sorted(reminder_dict.keys()):
+                    reminders_list.append(reminder_dict[index])
+                data_dict['reminders'] = reminders_list
         
         # Parse reminders if it's a string (JSON)
-        if 'reminders' in data_dict:
+        elif 'reminders' in data_dict:
             reminders_value = data_dict.get('reminders')
             if isinstance(reminders_value, str):
                 try:

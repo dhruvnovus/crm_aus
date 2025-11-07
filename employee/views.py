@@ -15,10 +15,6 @@ from django.utils import timezone
 from datetime import timedelta
 from dotenv import load_dotenv
 import os
-
-load_dotenv()
-APP_URL = os.getenv('APP_URL')
-logger = logging.getLogger('crm_aus')
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -41,6 +37,9 @@ from .serializers import (
     RegistrationResponseSerializer
 )
 
+load_dotenv()
+APP_URL = os.getenv('FRONTEND_URL')
+logger = logging.getLogger('crm_aus')
 
 class EmployeePagination(PageNumberPagination):
     """
@@ -929,7 +928,7 @@ def forgot_password(request):
             reset_token = PasswordResetToken.create_token(employee)
             
             # Send email with reset link
-            reset_link = f"{APP_URL}/reset-password?token={reset_token.token}"
+            reset_link = f"{APP_URL}reset-password?token={reset_token.token}"
             
             subject = "Password Reset Request"
             message = f"""Hello {employee.full_name},
