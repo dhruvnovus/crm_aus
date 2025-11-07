@@ -30,6 +30,7 @@ urlpatterns = [
     path('api/', include('customers.urls')),
     path('api/', include('task.urls')),
     path('api/', include('notifications.urls')),
+    path('api/', include('mail.urls')),
     
     # Swagger UI URLs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

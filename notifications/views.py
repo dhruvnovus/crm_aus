@@ -2,15 +2,17 @@
 Notification views for managing user notifications
 """
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from django.contrib.auth.models import User
+from django.http import StreamingHttpResponse
 from .models import Notification
 from .serializers import NotificationSerializer
 from employee.models import Employee
 from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken
+from .sse import publisher, event_stream
 
 
 @extend_schema_view(
@@ -260,4 +262,65 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             count = Notification.objects.filter(user=employee, is_read=False).count()
             return Response({'count': count})
         return Response({'count': 0})
+    
+    @extend_schema(
+        summary="Server-Sent Events stream for real-time notifications",
+        description="Stream real-time notifications using Server-Sent Events (SSE). "
+                    "Connect to this endpoint to receive notifications as they are created. "
+                    "Requires authentication via JWT token in Authorization header or 'token' query parameter. "
+                    "Note: EventSource API doesn't support custom headers, so use query parameter for browser clients.",
+        tags=["Notifications"],
+    )
+    @action(detail=False, methods=['get'], url_path='stream')
+    def stream(self, request):
+        """
+        SSE endpoint for streaming real-time notifications.
+        Requires authentication. Sends notifications when they are created.
+        
+        Authentication:
+        - Via Authorization header: Bearer <token> (for non-browser clients)
+        - Via query parameter: ?token=<jwt_token> (for browser EventSource API)
+        """
+        # Get authenticated employee (use existing method from ViewSet)
+        employee = self.get_authenticated_employee()
+        
+        # If not authenticated via ViewSet auth, try token from query parameter
+        if not employee:
+            token = request.query_params.get('token')
+            if token:
+                try:
+                    untyped_token = UntypedToken(token)
+                    user_id = untyped_token.get('user_id')
+                    if user_id:
+                        django_user = User.objects.get(id=user_id)
+                        employee = Employee.objects.filter(email=django_user.username, is_active=True).first()
+                        if not employee:
+                            employee = Employee.objects.filter(email=django_user.email, is_active=True).first()
+                        if not employee:
+                            employee = Employee.objects.filter(id=user_id, is_active=True).first()
+                except Exception:
+                    pass
+        
+        if not employee:
+            return Response(
+                {'error': 'Authentication required. Provide JWT token via Authorization header or ?token query parameter.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Subscribe to notification events
+        event_queue = publisher.subscribe(employee.id)
+        
+        # Create SSE response
+        response = StreamingHttpResponse(
+            event_stream(employee.id, event_queue),
+            content_type='text/event-stream'
+        )
+        
+        # Set headers for SSE
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx
+        # Note: 'Connection: keep-alive' is handled automatically by the server
+        # and cannot be set manually in WSGI responses
+        
+        return response
 

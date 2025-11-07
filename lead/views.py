@@ -2,6 +2,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count, Sum
 from django.http import Http404
@@ -575,6 +576,443 @@ class LeadViewSet(viewsets.ModelViewSet):
             ])
         
         return response
+    
+    @extend_schema(
+        summary="Import leads from CSV/Excel",
+        description="Import leads from a CSV or Excel file. Supports both .csv and .xlsx formats. Use multipart/form-data with 'file' field.",
+        tags=["Leads"],
+        request={
+            'multipart/form-data': {
+                'type': 'object',
+                'properties': {
+                    'file': {
+                        'type': 'string',
+                        'format': 'binary',
+                        'description': 'CSV or Excel file (.csv or .xlsx) containing lead data'
+                    }
+                },
+                'required': ['file']
+            }
+        },
+        responses={
+            200: {
+                'description': 'Import results',
+                'type': 'object',
+                'properties': {
+                    'success': {'type': 'boolean'},
+                    'message': {'type': 'string'},
+                    'created_count': {'type': 'integer'},
+                    'error_count': {'type': 'integer'},
+                    'errors': {'type': 'array'}
+                }
+            }
+        }
+    )
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def import_leads(self, request):
+        """
+        Import leads from CSV or Excel file
+        """
+        import csv
+        import io
+        from openpyxl import load_workbook
+        
+        if 'file' not in request.FILES:
+            return Response(
+                {"success": False, "error": "No file provided. Please upload a CSV or Excel file."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        uploaded_file = request.FILES['file']
+        file_name = uploaded_file.name.lower()
+        
+        # Validate file extension
+        if not (file_name.endswith('.csv') or file_name.endswith('.xlsx') or file_name.endswith('.xls')):
+            return Response(
+                {"success": False, "error": "Invalid file format. Please upload a CSV (.csv) or Excel (.xlsx, .xls) file."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        rows = []
+        
+        try:
+            # Read CSV file
+            if file_name.endswith('.csv'):
+                # Decode file content
+                file_content = uploaded_file.read().decode('utf-8-sig')  # Handle BOM
+                csv_reader = csv.DictReader(io.StringIO(file_content))
+                rows = list(csv_reader)
+            
+            # Read Excel file
+            elif file_name.endswith('.xlsx') or file_name.endswith('.xls'):
+                # Read file content into memory
+                file_content = uploaded_file.read()
+                workbook = load_workbook(filename=io.BytesIO(file_content), data_only=True)
+                sheet = workbook.active
+                
+                # Get headers from first row
+                headers = []
+                for cell in sheet[1]:
+                    if cell.value:
+                        headers.append(str(cell.value).strip())
+                    else:
+                        headers.append('')
+                
+                # Read data rows
+                for row in sheet.iter_rows(min_row=2, values_only=False):
+                    row_data = {}
+                    for idx, cell in enumerate(row):
+                        if idx < len(headers) and headers[idx]:
+                            value = cell.value
+                            # Convert to string, handling None
+                            if value is not None:
+                                row_data[headers[idx]] = str(value).strip()
+                            else:
+                                row_data[headers[idx]] = ''
+                    # Only add row if it has at least one non-empty value
+                    if any(row_data.values()):
+                        rows.append(row_data)
+            
+            if not rows:
+                return Response(
+                    {"success": False, "error": "File is empty or contains no data."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Process rows and create leads
+            created_leads = []
+            errors = []
+            
+            for row_num, row_data in enumerate(rows, start=2):  # Start at 2 (1 is header)
+                try:
+                    # Map CSV/Excel columns to Lead model fields
+                    lead_data = self._map_row_to_lead_data(row_data)
+                    
+                    # Validate and create lead
+                    lead_serializer = LeadCreateUpdateSerializer(data=lead_data)
+                    if lead_serializer.is_valid():
+                        lead = lead_serializer.save()
+                        created_leads.append(lead)
+                    else:
+                        errors.append({
+                            'row': row_num,
+                            'data': row_data,
+                            'errors': lead_serializer.errors
+                        })
+                except Exception as e:
+                    errors.append({
+                        'row': row_num,
+                        'data': row_data,
+                        'errors': str(e)
+                    })
+            
+            response_data = {
+                'success': True,
+                'message': f'Import completed. {len(created_leads)} leads created, {len(errors)} errors.',
+                'created_count': len(created_leads),
+                'error_count': len(errors),
+                'errors': errors[:50]  # Limit to first 50 errors to avoid huge response
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error importing leads: {str(e)}", exc_info=True)
+            return Response(
+                {"success": False, "error": f"Error processing file: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _map_row_to_lead_data(self, row_data):
+        """
+        Map CSV/Excel row data to Lead model fields
+        Handles column name variations and relationships
+        """
+        # Normalize keys (case-insensitive, strip whitespace, replace spaces with underscores)
+        normalized_row = {}
+        for k, v in row_data.items():
+            # Normalize key: lowercase, strip, replace spaces/hyphens with underscores
+            normalized_key = str(k).strip().lower().replace(' ', '_').replace('-', '_')
+            normalized_row[normalized_key] = str(v).strip() if v else ''
+        
+        # Also create aliases for common variations (without underscores)
+        aliases = {}
+        for key, value in normalized_row.items():
+            # Create alias without underscores
+            alias_key = key.replace('_', '')
+            if alias_key not in normalized_row:
+                aliases[alias_key] = value
+        normalized_row.update(aliases)
+        
+        lead_data = {}
+        
+        # Required fields with various column name options
+        title_map = {
+            'title': normalized_row.get('title', ''),
+            'mr': 'mr', 'mrs': 'mrs', 'miss': 'miss', 'ms': 'ms', 'other': 'other'
+        }
+        title_value = normalized_row.get('title', '').lower()
+        if title_value in ['mr', 'mrs', 'miss', 'ms', 'other']:
+            lead_data['title'] = title_value
+        else:
+            lead_data['title'] = 'mr'  # Default
+        
+        # First name (required)
+        lead_data['first_name'] = (
+            normalized_row.get('first_name', '') or 
+            normalized_row.get('firstname', '') or
+            normalized_row.get('first name', '') or
+            normalized_row.get('fname', '')
+        )
+        
+        # Last name (required)
+        lead_data['last_name'] = (
+            normalized_row.get('last_name', '') or 
+            normalized_row.get('lastname', '') or
+            normalized_row.get('last name', '') or
+            normalized_row.get('lname', '') or
+            normalized_row.get('surname', '')
+        )
+        
+        # Company name (required)
+        lead_data['company_name'] = (
+            normalized_row.get('company_name', '') or 
+            normalized_row.get('companyname', '') or
+            normalized_row.get('company name', '') or
+            normalized_row.get('company', '')
+        )
+        
+        # Contact number (required)
+        lead_data['contact_number'] = (
+            normalized_row.get('contact_number', '') or 
+            normalized_row.get('contactnumber', '') or
+            normalized_row.get('contact number', '') or
+            normalized_row.get('phone', '') or
+            normalized_row.get('mobile', '') or
+            normalized_row.get('phone_number', '') or
+            normalized_row.get('phone number', '') or
+            normalized_row.get('mobile_number', '') or
+            normalized_row.get('mobile number', '') or
+            normalized_row.get('contact', '')
+        )
+        
+        # Email address (required)
+        lead_data['email_address'] = (
+            normalized_row.get('email_address', '') or 
+            normalized_row.get('emailaddress', '') or
+            normalized_row.get('email address', '') or
+            normalized_row.get('email', '') or
+            normalized_row.get('e_mail', '') or
+            normalized_row.get('e mail', '')
+        ).lower()
+        
+        # Optional fields
+        custom_emails = (
+            normalized_row.get('custom_email_addresses', '') or 
+            normalized_row.get('customemailaddresses', '') or
+            normalized_row.get('custom email addresses', '') or
+            normalized_row.get('custom_emails', '') or
+            normalized_row.get('custom emails', '')
+        )
+        if custom_emails:
+            lead_data['custom_email_addresses'] = custom_emails
+        
+        if normalized_row.get('address', ''):
+            lead_data['address'] = normalized_row.get('address', '')
+        
+        if normalized_row.get('event', ''):
+            lead_data['event'] = normalized_row.get('event', '')
+        
+        # Lead type
+        lead_type = (
+            normalized_row.get('lead_type', '') or 
+            normalized_row.get('leadtype', '') or
+            normalized_row.get('lead type', '') or
+            normalized_row.get('type', '')
+        ).lower()
+        if lead_type in ['exhibitor', 'sponsor', 'visitor']:
+            lead_data['lead_type'] = lead_type
+        else:
+            lead_data['lead_type'] = 'exhibitor'  # Default
+        
+        booth_size = (
+            normalized_row.get('booth_size', '') or 
+            normalized_row.get('boothsize', '') or
+            normalized_row.get('booth size', '')
+        )
+        if booth_size:
+            lead_data['booth_size'] = booth_size
+        
+        # Status
+        status_value = (
+            normalized_row.get('status', '') or 
+            normalized_row.get('lead_status', '') or
+            normalized_row.get('leadstatus', '') or
+            normalized_row.get('lead status', '')
+        ).lower()
+        if status_value in [choice[0] for choice in Lead.STATUS_CHOICES]:
+            lead_data['status'] = status_value
+        else:
+            lead_data['status'] = 'new'  # Default
+        
+        # Intensity
+        intensity_value = (
+            normalized_row.get('intensity', '') or 
+            normalized_row.get('lead_intensity', '') or
+            normalized_row.get('leadintensity', '') or
+            normalized_row.get('lead intensity', '')
+        ).lower()
+        if intensity_value in ['cold', 'warm', 'hot', 'sql']:
+            lead_data['intensity'] = intensity_value
+        else:
+            lead_data['intensity'] = 'cold'  # Default
+        
+        if normalized_row.get('opportunity_price', ''):
+            try:
+                lead_data['opportunity_price'] = float(normalized_row.get('opportunity_price', '').replace(',', ''))
+            except (ValueError, AttributeError):
+                pass
+        
+        how_did_you_hear = (
+            normalized_row.get('how_did_you_hear', '') or 
+            normalized_row.get('howdidyouhear', '') or
+            normalized_row.get('how did you hear', '') or
+            normalized_row.get('how_did_you_hear_about_us', '') or
+            normalized_row.get('howdidyouhearaboutus', '') or
+            normalized_row.get('how did you hear about us', '')
+        )
+        if how_did_you_hear:
+            lead_data['how_did_you_hear'] = how_did_you_hear
+        
+        reason_for_enquiry = (
+            normalized_row.get('reason_for_enquiry', '') or 
+            normalized_row.get('reasonforenquiry', '') or
+            normalized_row.get('reason for enquiry', '') or
+            normalized_row.get('reason', '')
+        )
+        if reason_for_enquiry:
+            lead_data['reason_for_enquiry'] = reason_for_enquiry
+        
+        lead_name = (
+            normalized_row.get('lead_name', '') or 
+            normalized_row.get('leadname', '') or
+            normalized_row.get('lead name', '')
+        )
+        if lead_name:
+            lead_data['lead_name'] = lead_name
+        
+        lead_pipeline = (
+            normalized_row.get('lead_pipeline', '') or 
+            normalized_row.get('leadpipeline', '') or
+            normalized_row.get('lead pipeline', '')
+        )
+        if lead_pipeline:
+            lead_data['lead_pipeline'] = lead_pipeline
+        
+        lead_stage = (
+            normalized_row.get('lead_stage', '') or 
+            normalized_row.get('leadstage', '') or
+            normalized_row.get('lead stage', '')
+        )
+        if lead_stage:
+            lead_data['lead_stage'] = lead_stage
+        
+        # Handle ManyToMany relationships - create or get objects by name
+        # Sponsorship Types (comma-separated)
+        sponsorship_types = (
+            normalized_row.get('sponsorship_type', '') or 
+            normalized_row.get('sponsorshiptype', '') or
+            normalized_row.get('sponsorship type', '') or
+            normalized_row.get('sponsorship_types', '') or
+            normalized_row.get('sponsorshiptypes', '') or
+            normalized_row.get('sponsorship types', '')
+        )
+        if sponsorship_types:
+            sponsorship_type_names = [s.strip() for s in sponsorship_types.split(',') if s.strip()]
+            sponsorship_type_ids = []
+            for name in sponsorship_type_names:
+                sponsorship_type, created = SponsorshipType.objects.get_or_create(
+                    name=name,
+                    defaults={'is_deleted': False}
+                )
+                sponsorship_type_ids.append(sponsorship_type.id)
+            if sponsorship_type_ids:
+                lead_data['sponsorship_type'] = sponsorship_type_ids
+        
+        # Registration Groups (comma-separated)
+        registration_groups = (
+            normalized_row.get('registration_groups', '') or 
+            normalized_row.get('registrationgroups', '') or
+            normalized_row.get('registration groups', '') or
+            normalized_row.get('registration_group', '') or
+            normalized_row.get('registrationgroup', '') or
+            normalized_row.get('registration group', '')
+        )
+        if registration_groups:
+            registration_group_names = [r.strip() for r in registration_groups.split(',') if r.strip()]
+            registration_group_ids = []
+            for name in registration_group_names:
+                registration_group, created = RegistrationGroup.objects.get_or_create(
+                    name=name,
+                    defaults={'is_deleted': False}
+                )
+                registration_group_ids.append(registration_group.id)
+            if registration_group_ids:
+                lead_data['registration_groups'] = registration_group_ids
+        
+        # Tags (comma-separated)
+        tags = (
+            normalized_row.get('tags', '') or 
+            normalized_row.get('tag', '')
+        )
+        if tags:
+            tag_names = [t.strip() for t in tags.split(',') if t.strip()]
+            tag_ids = []
+            for name in tag_names:
+                tag, created = LeadTag.objects.get_or_create(
+                    name=name,
+                    defaults={'is_deleted': False}
+                )
+                tag_ids.append(tag.id)
+            if tag_ids:
+                lead_data['tags'] = tag_ids
+        
+        # Assigned Sales Staff (by employee ID or email - prefer ID)
+        assigned_staff = (
+            normalized_row.get('assigned_sales_staff', '') or 
+            normalized_row.get('assignedsalesstaff', '') or
+            normalized_row.get('assigned sales staff', '') or
+            normalized_row.get('assigned_staff', '') or
+            normalized_row.get('assignedstaff', '') or
+            normalized_row.get('assigned staff', '') or
+            normalized_row.get('employee_id', '') or
+            normalized_row.get('employeeid', '') or
+            normalized_row.get('employee id', '') or
+            normalized_row.get('sales_staff', '') or
+            normalized_row.get('salesstaff', '') or
+            normalized_row.get('sales staff', '')
+        )
+        if assigned_staff:
+            try:
+                # Try as ID first
+                employee_id = int(assigned_staff)
+                from employee.models import Employee
+                employee = Employee.objects.filter(id=employee_id, is_deleted=False).first()
+                if employee:
+                    lead_data['employee_id'] = employee_id
+            except (ValueError, TypeError):
+                # Try as email
+                try:
+                    from employee.models import Employee
+                    employee = Employee.objects.filter(email=assigned_staff, is_deleted=False).first()
+                    if employee:
+                        lead_data['employee_id'] = employee.id
+                except:
+                    pass
+        
+        return lead_data
 
     # History endpoints
     @extend_schema(
@@ -624,6 +1062,14 @@ class LeadViewSet(viewsets.ModelViewSet):
         except LeadHistory.DoesNotExist:
             return Response({"error": "History entry not found."}, status=status.HTTP_404_NOT_FOUND)
 
+@extend_schema_view(
+    list=extend_schema(tags=["Registration Groups"]),
+    retrieve=extend_schema(tags=["Registration Groups"]),
+    create=extend_schema(tags=["Registration Groups"]),
+    update=extend_schema(tags=["Registration Groups"]),
+    partial_update=extend_schema(tags=["Registration Groups"]),
+    destroy=extend_schema(tags=["Registration Groups"]),
+)
 class RegistrationGroupViewSet(viewsets.ModelViewSet):
     queryset = RegistrationGroup.objects.filter(is_deleted=False)
     serializer_class = RegistrationGroupSerializer
@@ -699,6 +1145,14 @@ class RegistrationGroupViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+@extend_schema_view(
+    list=extend_schema(tags=["Lead Tags"]),
+    retrieve=extend_schema(tags=["Lead Tags"]),
+    create=extend_schema(tags=["Lead Tags"]),
+    update=extend_schema(tags=["Lead Tags"]),
+    partial_update=extend_schema(tags=["Lead Tags"]),
+    destroy=extend_schema(tags=["Lead Tags"]),
+)
 class LeadTagViewSet(viewsets.ModelViewSet):
     queryset = LeadTag.objects.filter(is_deleted=False)
     serializer_class = LeadTagSerializer
@@ -769,6 +1223,14 @@ class LeadTagViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+@extend_schema_view(
+    list=extend_schema(tags=["Sponsorship Types"]),
+    retrieve=extend_schema(tags=["Sponsorship Types"]),
+    create=extend_schema(tags=["Sponsorship Types"]),
+    update=extend_schema(tags=["Sponsorship Types"]),
+    partial_update=extend_schema(tags=["Sponsorship Types"]),
+    destroy=extend_schema(tags=["Sponsorship Types"]),
+)
 class SponsorshipTypeViewSet(viewsets.ModelViewSet):
     queryset = SponsorshipType.objects.filter(is_deleted=False)
     serializer_class = SponsorshipTypeSerializer

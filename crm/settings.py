@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'customers',
     'task',
     'notifications',
+    'mail',
 ]
 
 MIDDLEWARE = [
@@ -113,6 +114,10 @@ if os.getenv('DJANGO_TEST') == '1':
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': ':memory:',
         }
+    }
+    # Disable problematic raw-SQL lead migrations when running tests on sqlite
+    MIGRATION_MODULES = {
+        'lead': None,
     }
 
 
@@ -201,6 +206,10 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Leads', 'description': 'Lead management operations'},
         {'name': 'Tasks', 'description': 'Task management operations'},
         {'name': 'Notifications', 'description': 'Notification management operations'},
+        {'name': 'Mails', 'description': 'Mail compose, list, and email-to-task operations'},
+        {'name': 'Lead Tags', 'description': 'Lead tags management'},
+        {'name': 'Registration Groups', 'description': 'Lead registration groups'},
+        {'name': 'Sponsorship Types', 'description': 'Lead sponsorship types'},
     ],
     'CONTACT': {
         'name': 'API Support',

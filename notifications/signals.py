@@ -4,6 +4,78 @@ Helper functions for creating notifications from other apps
 from django.utils import timezone
 from .models import Notification
 from employee.models import Employee
+from .sse import publisher
+
+
+def _serialize_notification_for_sse(notification):
+    """
+    Serialize notification for SSE without requiring request context.
+    This is a simplified version that works without DRF serializer context.
+    """
+    data = {
+        'id': notification.id,
+        'user': notification.user.id,
+        'notification_type': notification.notification_type,
+        'title': notification.title,
+        'message': notification.message,
+        'lead_id': notification.lead_id,
+        'task_id': notification.task_id,
+        'reminder_id': notification.reminder_id,
+        'metadata': notification.metadata,
+        'is_read': notification.is_read,
+        'read_at': notification.read_at.isoformat() if notification.read_at else None,
+        'created_at': notification.created_at.isoformat(),
+        'updated_at': notification.updated_at.isoformat(),
+    }
+    
+    # Add lead_data if applicable
+    if notification.notification_type == 'lead_assignment' and notification.lead_id:
+        try:
+            from lead.models import Lead
+            lead = Lead.objects.get(id=notification.lead_id)
+            data['lead_data'] = {
+                'id': lead.id,
+                'full_name': lead.full_name,
+                'company_name': lead.company_name,
+                'email_address': lead.email_address,
+                'contact_number': lead.contact_number,
+                'status': lead.status,
+                'lead_type': lead.lead_type,
+            }
+        except Exception:
+            data['lead_data'] = None
+    
+    # Add task_data if applicable
+    if notification.notification_type in ['task_assignment', 'task_reminder'] and notification.task_id:
+        try:
+            from task.models import Task
+            task = Task.objects.get(id=notification.task_id)
+            data['task_data'] = {
+                'id': task.id,
+                'title': task.title,
+                'description': task.description,
+                'priority': task.priority,
+                'status': task.status,
+                'due_date': task.due_date.isoformat(),
+                'due_time': task.due_time.isoformat(),
+            }
+        except Exception:
+            data['task_data'] = None
+    
+    # Add reminder_data if applicable
+    if notification.notification_type == 'task_reminder' and notification.reminder_id:
+        try:
+            from task.models import TaskReminder
+            reminder = TaskReminder.objects.get(id=notification.reminder_id)
+            data['reminder_data'] = {
+                'id': reminder.id,
+                'remind_at': reminder.remind_at.isoformat(),
+                'is_sent': reminder.is_sent,
+            }
+        except Exception:
+            data['reminder_data'] = None
+    
+    return data
 
 
 def create_lead_assignment_notification(lead, assigned_sales_staff):
@@ -44,7 +116,7 @@ def create_lead_assignment_notification(lead, assigned_sales_staff):
                 ).first()
     
     if employee:
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user=employee,
             notification_type='lead_assignment',
             title=f'Lead Assigned: {lead.full_name}',
@@ -58,9 +130,29 @@ def create_lead_assignment_notification(lead, assigned_sales_staff):
                 'lead_type': lead.lead_type,
             }
         )
+        
+        # Publish SSE event for real-time notification
+        try:
+            notification_data = _serialize_notification_for_sse(notification)
+            publisher.publish(
+                user_id=employee.id,
+                event_type='notification',
+                data=notification_data
+            )
+            # Debug logging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Published SSE notification for employee_id={employee.id}, notification_id={notification.id}, lead_id={lead.id}")
+        except Exception as e:
+            # Log error but don't fail notification creation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to publish SSE event for notification {notification.id}: {str(e)}", exc_info=True)
     else:
         # Log if employee not found (for debugging)
-        print(f"Warning: Could not find employee '{assigned_sales_staff}' for lead assignment notification")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Could not find employee '{assigned_sales_staff}' for lead assignment notification (lead_id={lead.id})")
 
 
 def create_task_assignment_notification(task, is_new=False):
@@ -71,7 +163,7 @@ def create_task_assignment_notification(task, is_new=False):
         title = f'New Task Assigned: {task.title}' if is_new else f'Task Assigned: {task.title}'
         message = f'A new task "{task.title}" has been assigned to you.' if is_new else f'Task "{task.title}" has been assigned to you.'
         
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user=task.assigned_to,
             notification_type='task_assignment',
             title=title,
@@ -84,6 +176,14 @@ def create_task_assignment_notification(task, is_new=False):
                 'status': task.status,
             }
         )
+        
+        # Publish SSE event for real-time notification
+        notification_data = _serialize_notification_for_sse(notification)
+        publisher.publish(
+            user_id=task.assigned_to.id,
+            event_type='notification',
+            data=notification_data
+        )
 
 
 def create_task_reminder_notification(reminder):
@@ -95,7 +195,7 @@ def create_task_reminder_notification(reminder):
     
     # Only create notification if task has assigned user and is not deleted/completed
     if task.assigned_to and not task.is_deleted and task.status != 'completed':
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user=task.assigned_to,
             notification_type='task_reminder',
             title=f'Task Reminder: {task.title}',
@@ -108,5 +208,13 @@ def create_task_reminder_notification(reminder):
                 'due_time': str(task.due_time),
                 'remind_at': reminder.remind_at.isoformat(),
             }
+        )
+        
+        # Publish SSE event for real-time notification
+        notification_data = _serialize_notification_for_sse(notification)
+        publisher.publish(
+            user_id=task.assigned_to.id,
+            event_type='notification',
+            data=notification_data
         )
 
