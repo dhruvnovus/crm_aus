@@ -12,7 +12,12 @@ from django.http import Http404
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+from datetime import timedelta
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
+APP_URL = os.getenv('APP_URL')
 logger = logging.getLogger('crm_aus')
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
@@ -847,6 +852,15 @@ def login_user(request):
             # Generate JWT tokens for Django auth user
             refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
+            # Extend token expiry when remember_me is True
+            try:
+                remember_me = bool(serializer.validated_data.get('remember_me', False))
+            except Exception:
+                remember_me = False
+            if remember_me:
+                # Override this token pair's lifetime to 30 days
+                access_token.set_exp(lifetime=timedelta(days=30))
+                refresh.set_exp(lifetime=timedelta(days=30))
             
             # Prepare user data: include full employee details in response
             from .serializers import EmployeeDetailSerializer
@@ -915,7 +929,7 @@ def forgot_password(request):
             reset_token = PasswordResetToken.create_token(employee)
             
             # Send email with reset link
-            reset_link = f"https://yourapp.com/reset-password?token={reset_token.token}"
+            reset_link = f"{APP_URL}/reset-password?token={reset_token.token}"
             
             subject = "Password Reset Request"
             message = f"""Hello {employee.full_name},
