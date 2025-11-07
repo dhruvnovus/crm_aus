@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType
 from employee.models import Employee
-from employee.serializers import EmployeeListSerializer, EmployeeDetailSerializer  
+from employee.serializers import EmployeeListSerializer, EmployeeDetailSerializer 
 from customers.models import Customer
+from customers.serializers import CustomerListSerializer, CustomerDetailSerializer
 from django.db import transaction
 from django.contrib.auth.hashers import make_password
 import uuid
@@ -12,25 +13,25 @@ class LeadListSerializer(serializers.ModelSerializer):
     """
     Serializer for Lead list view (minimal fields for performance)
     """
-    full_name = serializers.ReadOnlyField()
+    # full_name = serializers.ReadOnlyField()
     status_display = serializers.ReadOnlyField()
-    title_display = serializers.CharField(source='get_title_display', read_only=True)
+    # title_display = serializers.CharField(source='get_title_display', read_only=True)
     lead_type_display = serializers.CharField(source='get_lead_type_display', read_only=True)
     intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
     tag_list = serializers.ReadOnlyField()
-    custom_email_list = serializers.ReadOnlyField()
+    # custom_email_list = serializers.ReadOnlyField()
     assigned_sales_staff = EmployeeListSerializer(read_only=True)
+    customer = CustomerListSerializer(read_only=True)
     
     class Meta:
         model = Lead
         fields = [
-            'id', 'title', 'title_display', 'first_name', 'last_name', 'full_name',
-            'company_name', 'contact_number', 'email_address', 'custom_email_addresses',
-            'custom_email_list', 'address', 'event', 'lead_type', 'lead_type_display',
+            'id', 'custom_email_addresses',
+            'event', 'lead_type', 'lead_type_display',
             'booth_size', 'sponsorship_type', 'registration_groups', 'status',
             'status_display', 'intensity', 'intensity_display', 'opportunity_price',
             'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry',
-            'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage',
+            'assigned_sales_staff', 'customer', 'lead_name', 'lead_pipeline', 'lead_stage',
             'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
@@ -48,14 +49,14 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     # lead_type_display = serializers.CharField(source='get_lead_type_display', read_only=True)
     # intensity_display = serializers.CharField(source='get_intensity_display', read_only=True)
     tag_list = serializers.ReadOnlyField()
-    custom_email_list = serializers.ReadOnlyField()
+    # custom_email_list = serializers.ReadOnlyField()
     assigned_sales_staff = EmployeeDetailSerializer(read_only=True)
-    
+    customer = CustomerDetailSerializer(read_only=True)
     class Meta:
         model = Lead
         fields = [
-            'id', 'title', 'first_name', 'last_name','company_name', 'contact_number', 'email_address', 'custom_email_addresses', 'custom_email_list', 'address', 'event',
-            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at', 'is_deleted'
+            'id', 'custom_email_addresses',
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
