@@ -150,20 +150,32 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
                 # Try to find by email; otherwise create a minimal customer from lead data
                 email = (validated_data.get('email_address') or '').strip().lower()
                 customer = None
-                if email:
+                if email and email != 'noemail@example.com':
                     customer = Customer.objects.filter(email=email, is_deleted=False).first()
                 if customer is None:
-                    customer = Customer.objects.create(
-                        first_name=validated_data.get('first_name', ''),
-                        last_name=validated_data.get('last_name', ''),
-                        company_name=validated_data.get('company_name', ''),
-                        mobile_phone=validated_data.get('contact_number', ''),
-                        email=email,
-                        address=validated_data.get('address'),
-                        type=(validated_data.get('lead_type') if validated_data.get('lead_type') in ['exhibitor', 'sponsor'] else 'exhibitor'),
-                        event=validated_data.get('event'),
-                        password=make_password(uuid.uuid4().hex),
-                    )
+                    # Generate unique email if default email is used
+                    if not email or email == 'noemail@example.com':
+                        email = f"noemail_{uuid.uuid4().hex[:8]}@example.com"
+                    try:
+                        customer = Customer.objects.create(
+                            first_name=validated_data.get('first_name', ''),
+                            last_name=validated_data.get('last_name', ''),
+                            company_name=validated_data.get('company_name', ''),
+                            mobile_phone=validated_data.get('contact_number', ''),
+                            email=email,
+                            address=validated_data.get('address'),
+                            type=(validated_data.get('lead_type') if validated_data.get('lead_type') in ['exhibitor', 'sponsor'] else 'exhibitor'),
+                            event=validated_data.get('event'),
+                            password=make_password(uuid.uuid4().hex),
+                        )
+                    except Exception as e:
+                        # If customer creation fails (e.g., duplicate email), try to get existing one
+                        if 'email' in str(e).lower() or 'unique' in str(e).lower():
+                            customer = Customer.objects.filter(email=email, is_deleted=False).first()
+                            if not customer:
+                                raise serializers.ValidationError({"email": f"Customer with email {email} already exists or creation failed: {str(e)}"})
+                        else:
+                            raise
 
             # create lead with linked customer
             lead = Lead.objects.create(customer=customer, **validated_data)

@@ -641,7 +641,27 @@ class LeadViewSet(viewsets.ModelViewSet):
                 # Decode file content
                 file_content = uploaded_file.read().decode('utf-8-sig')  # Handle BOM
                 csv_reader = csv.DictReader(io.StringIO(file_content))
-                rows = list(csv_reader)
+                all_csv_rows = list(csv_reader)
+                
+                # Filter out empty rows - only keep rows with at least one required field
+                # Required fields: Name (or first_name/last_name), Email, Mobile No
+                required_fields = ['name', 'first_name', 'last_name', 'email', 'email_address', 
+                                 'mobile', 'mobile_no', 'mobile no', 'contact_number', 'contact number',
+                                 'phone', 'phone_number', 'phone number']
+                
+                rows = []
+                for row in all_csv_rows:
+                    has_required_data = False
+                    for key, value in row.items():
+                        key_lower = str(key).lower().strip()
+                        value_str = str(value).strip() if value else ''
+                        # Check if this is a required field and has meaningful data
+                        if any(req_field in key_lower for req_field in required_fields):
+                            if value_str and value_str.lower() not in ['', 'none', 'null', 'n/a', 'na']:
+                                has_required_data = True
+                                break
+                    if has_required_data:
+                        rows.append(row)
             
             # Read Excel file
             elif file_name.endswith('.xlsx') or file_name.endswith('.xls'):
@@ -669,8 +689,25 @@ class LeadViewSet(viewsets.ModelViewSet):
                                 row_data[headers[idx]] = str(value).strip()
                             else:
                                 row_data[headers[idx]] = ''
-                    # Only add row if it has at least one non-empty value
-                    if any(row_data.values()):
+                    
+                    # Only add row if it has at least one required field with non-empty value
+                    # Required fields: Name (or first_name/last_name), Email, Mobile No
+                    required_fields = ['name', 'first_name', 'last_name', 'email', 'email_address', 
+                                     'mobile', 'mobile_no', 'mobile no', 'contact_number', 'contact number',
+                                     'phone', 'phone_number', 'phone number']
+                    
+                    # Check if row has at least one required field with actual data (not empty, not "N/A", not "None")
+                    has_required_data = False
+                    for key, value in row_data.items():
+                        key_lower = str(key).lower().strip()
+                        value_str = str(value).strip() if value else ''
+                        # Check if this is a required field and has meaningful data
+                        if any(req_field in key_lower for req_field in required_fields):
+                            if value_str and value_str.lower() not in ['', 'none', 'null', 'n/a', 'na']:
+                                has_required_data = True
+                                break
+                    
+                    if has_required_data:
                         rows.append(row_data)
             
             if not rows:
@@ -686,13 +723,28 @@ class LeadViewSet(viewsets.ModelViewSet):
             for row_num, row_data in enumerate(rows, start=2):  # Start at 2 (1 is header)
                 try:
                     # Map CSV/Excel columns to Lead model fields
-                    lead_data = self._map_row_to_lead_data(row_data)
+                    try:
+                        lead_data = self._map_row_to_lead_data(row_data)
+                    except Exception as map_error:
+                        errors.append({
+                            'row': row_num,
+                            'data': row_data,
+                            'errors': f"Error mapping row data: {str(map_error)}"
+                        })
+                        continue
                     
                     # Validate and create lead
                     lead_serializer = LeadCreateUpdateSerializer(data=lead_data)
                     if lead_serializer.is_valid():
-                        lead = lead_serializer.save()
-                        created_leads.append(lead)
+                        try:
+                            lead = lead_serializer.save()
+                            created_leads.append(lead)
+                        except Exception as save_error:
+                            errors.append({
+                                'row': row_num,
+                                'data': row_data,
+                                'errors': f"Error saving lead: {str(save_error)}"
+                            })
                     else:
                         errors.append({
                             'row': row_num,
@@ -703,7 +755,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                     errors.append({
                         'row': row_num,
                         'data': row_data,
-                        'errors': str(e)
+                        'errors': f"Unexpected error: {str(e)}"
                     })
             
             response_data = {
@@ -721,7 +773,10 @@ class LeadViewSet(viewsets.ModelViewSet):
             logger = logging.getLogger(__name__)
             logger.error(f"Error importing leads: {str(e)}", exc_info=True)
             return Response(
-                {"success": False, "error": f"Error processing file: {str(e)}"},
+                {
+                    "success": False, 
+                    "error": f"Error processing file: {str(e)}"
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -733,9 +788,22 @@ class LeadViewSet(viewsets.ModelViewSet):
         # Normalize keys (case-insensitive, strip whitespace, replace spaces with underscores)
         normalized_row = {}
         for k, v in row_data.items():
-            # Normalize key: lowercase, strip, replace spaces/hyphens with underscores
-            normalized_key = str(k).strip().lower().replace(' ', '_').replace('-', '_')
-            normalized_row[normalized_key] = str(v).strip() if v else ''
+            try:
+                # Normalize key: lowercase, strip, replace spaces/hyphens with underscores
+                normalized_key = str(k).strip().lower().replace(' ', '_').replace('-', '_')
+                # Handle value - convert to string, handle None, "None", "null", etc.
+                if v is None:
+                    normalized_row[normalized_key] = ''
+                else:
+                    v_str = str(v).strip()
+                    # Treat "None", "null", "NULL" as empty
+                    if v_str.lower() in ['none', 'null', 'nan', '']:
+                        normalized_row[normalized_key] = ''
+                    else:
+                        normalized_row[normalized_key] = v_str
+            except Exception as e:
+                # Skip problematic keys
+                continue
         
         # Also create aliases for common variations (without underscores)
         aliases = {}
@@ -748,44 +816,73 @@ class LeadViewSet(viewsets.ModelViewSet):
         
         lead_data = {}
         
-        # Required fields with various column name options
-        title_map = {
-            'title': normalized_row.get('title', ''),
-            'mr': 'mr', 'mrs': 'mrs', 'miss': 'miss', 'ms': 'ms', 'other': 'other'
-        }
-        title_value = normalized_row.get('title', '').lower()
-        if title_value in ['mr', 'mrs', 'miss', 'ms', 'other']:
-            lead_data['title'] = title_value
-        else:
-            lead_data['title'] = 'mr'  # Default
+        # Default title
+        lead_data['title'] = 'mr'  # Default
         
-        # First name (required)
-        lead_data['first_name'] = (
+        # Handle "Name" field - split into first_name and last_name
+        name_field = (
+            normalized_row.get('name', '') or 
+            normalized_row.get('full_name', '') or
+            normalized_row.get('fullname', '') or
+            normalized_row.get('full name', '')
+        ).strip()
+        
+        # Also check for separate first_name and last_name fields
+        first_name_raw = str(
             normalized_row.get('first_name', '') or 
             normalized_row.get('firstname', '') or
             normalized_row.get('first name', '') or
-            normalized_row.get('fname', '')
-        )
+            normalized_row.get('fname', '') or ''
+        ).strip()
         
-        # Last name (required)
-        lead_data['last_name'] = (
+        last_name_raw = str(
             normalized_row.get('last_name', '') or 
             normalized_row.get('lastname', '') or
             normalized_row.get('last name', '') or
             normalized_row.get('lname', '') or
-            normalized_row.get('surname', '')
-        )
+            normalized_row.get('surname', '') or ''
+        ).strip()
         
-        # Company name (required)
-        lead_data['company_name'] = (
+        # If "Name" field exists, split it into first and last name
+        if name_field and not first_name_raw and not last_name_raw:
+            # Split name by space - first word is first name, rest is last name
+            name_parts = name_field.split()
+            if len(name_parts) >= 1:
+                first_name_raw = name_parts[0].strip()
+                # Handle "N/A" in name
+                if ' N/A' in first_name_raw or ' n/a' in first_name_raw:
+                    first_name_raw = first_name_raw.split(' N/A')[0].split(' n/a')[0].strip()
+            if len(name_parts) >= 2:
+                last_name_raw = ' '.join(name_parts[1:]).strip()
+            else:
+                last_name_raw = ''
+        
+        # Handle cases where first_name might contain "N/A" or be split
+        if first_name_raw and (' N/A' in first_name_raw or ' n/a' in first_name_raw):
+            first_name_raw = first_name_raw.split(' N/A')[0].split(' n/a')[0].strip()
+        
+        lead_data['first_name'] = first_name_raw if first_name_raw else 'N/A'
+        
+        # Handle "None" string, empty, or None value for last name
+        if not last_name_raw or last_name_raw.lower() in ['none', 'null', 'n/a', 'na']:
+            lead_data['last_name'] = 'N/A'
+        else:
+            lead_data['last_name'] = last_name_raw
+        
+        # Company name (required) - default to "N/A" if not provided
+        company_name_raw = str(
             normalized_row.get('company_name', '') or 
             normalized_row.get('companyname', '') or
             normalized_row.get('company name', '') or
-            normalized_row.get('company', '')
-        )
+            normalized_row.get('company', '') or ''
+        ).strip()
+        lead_data['company_name'] = company_name_raw if company_name_raw else 'N/A'
         
-        # Contact number (required)
-        lead_data['contact_number'] = (
+        # Contact number (required) - map from "Mobile No" or "Mobile No"
+        contact_number_raw = str(
+            normalized_row.get('mobile_no', '') or 
+            normalized_row.get('mobile no', '') or
+            normalized_row.get('mobileno', '') or
             normalized_row.get('contact_number', '') or 
             normalized_row.get('contactnumber', '') or
             normalized_row.get('contact number', '') or
@@ -795,18 +892,25 @@ class LeadViewSet(viewsets.ModelViewSet):
             normalized_row.get('phone number', '') or
             normalized_row.get('mobile_number', '') or
             normalized_row.get('mobile number', '') or
-            normalized_row.get('contact', '')
-        )
+            normalized_row.get('contact', '') or ''
+        ).strip()
+        # Contact number must match regex: ^\+?1?\d{9,15}$
+        if contact_number_raw:
+            lead_data['contact_number'] = contact_number_raw
+        else:
+            # Use a valid default that passes the regex validator
+            lead_data['contact_number'] = '1234567890'
         
-        # Email address (required)
-        lead_data['email_address'] = (
+        # Email address (required) - map from "Email"
+        email_address_raw = str(
+            normalized_row.get('email', '') or
             normalized_row.get('email_address', '') or 
             normalized_row.get('emailaddress', '') or
             normalized_row.get('email address', '') or
-            normalized_row.get('email', '') or
             normalized_row.get('e_mail', '') or
-            normalized_row.get('e mail', '')
-        ).lower()
+            normalized_row.get('e mail', '') or ''
+        ).strip().lower()
+        lead_data['email_address'] = email_address_raw if email_address_raw else 'noemail@example.com'
         
         # Optional fields
         custom_emails = (
