@@ -114,8 +114,14 @@ class LeadViewSet(viewsets.ModelViewSet):
         
         # Create notification if lead is assigned during creation
         if lead.assigned_sales_staff:
-            from notifications.signals import create_lead_assignment_notification
-            create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+            try:
+                from notifications.signals import create_lead_assignment_notification
+                create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+            except Exception as e:
+                # Log error but don't fail lead creation
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to create notification for lead {lead.id}: {str(e)}", exc_info=True)
     
     def perform_update(self, serializer):
         """Update lead and send notification if assignment changed"""
@@ -124,8 +130,14 @@ class LeadViewSet(viewsets.ModelViewSet):
         
         # Create notification if assignment changed
         if lead.assigned_sales_staff and old_assigned != lead.assigned_sales_staff:
-            from notifications.signals import create_lead_assignment_notification
-            create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+            try:
+                from notifications.signals import create_lead_assignment_notification
+                create_lead_assignment_notification(lead, lead.assigned_sales_staff)
+            except Exception as e:
+                # Log error but don't fail lead update
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to create notification for lead {lead.id}: {str(e)}", exc_info=True)
     
     def get_queryset(self):
         """
@@ -167,7 +179,9 @@ class LeadViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            lead = serializer.save()
+            # Use perform_create to ensure notification is created
+            self.perform_create(serializer)
+            lead = serializer.instance
         except Exception as exc:
             return Response({"status": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         # Return detailed lead data
@@ -185,7 +199,9 @@ class LeadViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            lead = serializer.save()
+            # Use perform_update to ensure notification is created if assignment changed
+            self.perform_update(serializer)
+            lead = serializer.instance
         except Exception as exc:
             return Response({"status": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         # Return detailed lead data
