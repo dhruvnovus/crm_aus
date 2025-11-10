@@ -954,10 +954,57 @@ class LeadViewSet(viewsets.ModelViewSet):
             normalized_row.get('status', '') or 
             normalized_row.get('lead_status', '') or
             normalized_row.get('leadstatus', '') or
-            normalized_row.get('lead status', '')
-        ).lower()
-        if status_value in [choice[0] for choice in Lead.STATUS_CHOICES]:
-            lead_data['status'] = status_value
+            normalized_row.get('lead status', '') or
+            normalized_row.get('lead_status_display', '') or
+            normalized_row.get('leadstatusdisplay', '') or
+            normalized_row.get('lead status display', '')
+        ).strip()
+        
+        if status_value:
+            status_lower = status_value.lower()
+            # First, check if it's a valid status key (e.g., 'new', 'contacted')
+            valid_status_keys = [choice[0] for choice in Lead.STATUS_CHOICES]
+            if status_lower in valid_status_keys:
+                lead_data['status'] = status_lower
+            else:
+                # Try to match display names (e.g., 'New', 'Contacted', 'Info Pack')
+                status_mapping = {
+                    'new': 'new',
+                    'attendee': 'attendee',
+                    'job leads': 'job_leads',
+                    'job_leads': 'job_leads',
+                    'info pack': 'info_pack',
+                    'info_pack': 'info_pack',
+                    'attempted contact': 'attempted_contact',
+                    'attempted_contact': 'attempted_contact',
+                    'contacted': 'contacted',
+                    'contract signed': 'contract_signed',
+                    'contract_signed': 'contract_signed',
+                    'contract & invoice sent': 'contract_invoice_sent',
+                    'contract_invoice_sent': 'contract_invoice_sent',
+                    'contract and invoice sent': 'contract_invoice_sent',
+                    'contract signed & paid': 'contract_signed_paid',
+                    'contract_signed_paid': 'contract_signed_paid',
+                    'contract signed and paid': 'contract_signed_paid',
+                    'withdrawn': 'withdrawn',
+                    'lost': 'lost',
+                    'converted': 'converted',
+                    'future': 'future',
+                }
+                # Try exact match first
+                if status_lower in status_mapping:
+                    lead_data['status'] = status_mapping[status_lower]
+                else:
+                    # Try partial match (e.g., "Info Pack" -> "info pack")
+                    matched = False
+                    for display_name, status_key in status_mapping.items():
+                        if display_name in status_lower or status_lower in display_name:
+                            lead_data['status'] = status_key
+                            matched = True
+                            break
+                    if not matched:
+                        # Default to 'new' if no match found
+                        lead_data['status'] = 'new'
         else:
             lead_data['status'] = 'new'  # Default
         
