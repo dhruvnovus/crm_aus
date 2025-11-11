@@ -88,7 +88,7 @@ class NotificationEventPublisher:
 publisher = NotificationEventPublisher()
 
 
-def format_sse_event(event_id: int, event_type: str, data: dict) -> str:
+def format_sse_event(event_id: int, event_type: str, data: dict, retry_ms: int | None = None) -> str:
     """
     Format data as a Server-Sent Event.
     
@@ -96,6 +96,7 @@ def format_sse_event(event_id: int, event_type: str, data: dict) -> str:
         event_id: Unique event ID
         event_type: Type of event
         data: Event data (will be JSON encoded)
+        retry_ms: Optional reconnection time for clients (in milliseconds)
     
     Returns:
         Formatted SSE string
@@ -108,6 +109,10 @@ def format_sse_event(event_id: int, event_type: str, data: dict) -> str:
     # Event type
     if event_type:
         lines.append(f"event: {event_type}")
+    
+    # Optional retry directive (client reconnection delay)
+    if retry_ms is not None:
+        lines.append(f"retry: {retry_ms}")
     
     # Data (must be JSON encoded)
     json_data = json.dumps(data, default=str)
@@ -138,13 +143,17 @@ def event_stream(user_id: int, event_queue: queue.Queue):
     yield format_sse_event(
         event_id=event_id,
         event_type='connected',
-        data={'message': 'Connected to notification stream', 'user_id': user_id}
+        data={'message': 'Connected to notification stream', 'user_id': user_id},
+        retry_ms=3000,  # advise clients to retry after 3s if disconnected
     )
     event_id += 1
     
     # Keep-alive ping every 5 seconds
     last_ping = time.time()
     PING_INTERVAL = 5
+    # Separate lightweight heartbeat (comment) every 10 seconds to defeat buffering proxies
+    last_heartbeat = time.time()
+    HEARTBEAT_INTERVAL = 10
     
     while True:
         try:
@@ -155,7 +164,8 @@ def event_stream(user_id: int, event_queue: queue.Queue):
                 yield format_sse_event(
                     event_id=event_id,
                     event_type=event.get('type', 'notification'),
-                    data=event.get('data', {})
+                    data=event.get('data', {}),
+                    retry_ms=3000,
                 )
                 event_id += 1
             except queue.Empty:
@@ -165,10 +175,18 @@ def event_stream(user_id: int, event_queue: queue.Queue):
                     yield format_sse_event(
                         event_id=event_id,
                         event_type='ping',
-                        data={'message': 'keep-alive'}
+                        data={'message': 'keep-alive'},
+                        retry_ms=3000,
                     )
                     event_id += 1
                     last_ping = current_time
+                
+                # Send lightweight heartbeat comment to force flush on some proxies
+                if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    # Comment lines in SSE start with ":" and end with double newline
+                    # They are ignored by clients but keep the connection active and bypass buffering
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = current_time
                 continue
             
         except GeneratorExit:
@@ -180,7 +198,8 @@ def event_stream(user_id: int, event_queue: queue.Queue):
             yield format_sse_event(
                 event_id=event_id,
                 event_type='error',
-                data={'error': str(e)}
+                data={'error': str(e)},
+                retry_ms=3000,
             )
             event_id += 1
             break

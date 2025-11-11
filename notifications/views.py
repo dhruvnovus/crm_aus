@@ -13,6 +13,7 @@ from employee.models import Employee
 from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken
 from .sse import publisher, event_stream
+from .renderers import SSERenderer
 
 
 @extend_schema_view(
@@ -53,7 +54,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             try:
                 token = auth_header.split(' ')[1]
                 untyped_token = UntypedToken(token)
-                user_id = untyped_token.get('user_id')
+                # Access payload correctly from UntypedToken
+                user_id = getattr(untyped_token, 'payload', {}).get('user_id')
                 if user_id:
                     # The user_id in token is for Django User, not Employee
                     # We need to find Employee by matching email
@@ -271,7 +273,13 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
                     "Note: EventSource API doesn't support custom headers, so use query parameter for browser clients.",
         tags=["Notifications"],
     )
-    @action(detail=False, methods=['get'], url_path='stream')
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='stream',
+        renderer_classes=[SSERenderer],
+        permission_classes=[permissions.AllowAny],  # authenticate inside the action
+    )
     def stream(self, request):
         """
         SSE endpoint for streaming real-time notifications.
@@ -290,7 +298,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             if token:
                 try:
                     untyped_token = UntypedToken(token)
-                    user_id = untyped_token.get('user_id')
+                    user_id = getattr(untyped_token, 'payload', {}).get('user_id')
                     if user_id:
                         django_user = User.objects.get(id=user_id)
                         employee = Employee.objects.filter(email=django_user.username, is_active=True).first()
@@ -313,11 +321,11 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         # Create SSE response
         response = StreamingHttpResponse(
             event_stream(employee.id, event_queue),
-            content_type='text/event-stream'
+            content_type='text/event-stream; charset=utf-8'
         )
         
         # Set headers for SSE
-        response['Cache-Control'] = 'no-cache'
+        response['Cache-Control'] = 'no-cache, no-transform'
         response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx
         # Note: 'Connection: keep-alive' is handled automatically by the server
         # and cannot be set manually in WSGI responses
