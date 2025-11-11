@@ -34,7 +34,7 @@ class SubtaskSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
 
     def get_child_task_details(self, obj):
-        if obj.child_task_id:
+        if obj.child_task_id and getattr(obj.child_task, 'is_deleted', False) is False:
             # Return full task details (excluding nested subtasks to avoid recursion)
             return ChildTaskDetailSerializer(obj.child_task).data
         return None
@@ -95,6 +95,19 @@ class TaskSerializer(serializers.ModelSerializer):
             return obj.assigned_to.full_name
         return None
 
+    def to_representation(self, instance):
+        """
+        Ensure deleted child tasks are not included in the subtasks list.
+        """
+        rep = super().to_representation(instance)
+        # Replace subtasks with only non-deleted child tasks
+        try:
+            queryset = instance.subtasks.select_related('child_task').filter(child_task__is_deleted=False).order_by('sort_order', 'id')
+            rep['subtasks'] = SubtaskSerializer(queryset, many=True, context=self.context).data
+        except Exception:
+            # Fallback to whatever was already serialized
+            pass
+        return rep
     def to_internal_value(self, data):
         """
         Parse JSON strings from multipart/form-data for nested fields.

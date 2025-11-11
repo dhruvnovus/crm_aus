@@ -6,6 +6,7 @@ from task.serializers import TaskSerializer, TaskReminderSerializer
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import EmailValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.conf import settings
 
 
 class MailAttachmentSerializer(serializers.ModelSerializer):
@@ -116,6 +117,8 @@ class MailSerializer(serializers.ModelSerializer):
             mutable['linked_task'] = None
         if mutable.get('employee_id') == '':
             mutable['employee_id'] = None
+        if mutable.get('from_email') == '':
+            mutable['from_email'] = None
 
         # Coerce potential string lists
         mutable = self._coerce_email_list(mutable, 'to_emails')
@@ -138,10 +141,25 @@ class MailSerializer(serializers.ModelSerializer):
             mutable['files'] = files_list
         return super().to_internal_value(mutable)
 
+    def to_representation(self, instance):
+        """
+        Convert empty string from_email to DEFAULT_FROM_EMAIL in response
+        Shows the actual email address that will be used for sending
+        """
+        representation = super().to_representation(instance)
+        from_email = representation.get('from_email')
+        # If from_email is empty, null, or not provided, use DEFAULT_FROM_EMAIL
+        if not from_email or from_email == '':
+            representation['from_email'] = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+        return representation
+
     def create(self, validated_data):
         files = validated_data.pop('files', [])
         employee_id = validated_data.pop('employee_id')
         validated_data['owner_id'] = employee_id
+        # Ensure from_email is None if empty string
+        if validated_data.get('from_email') == '':
+            validated_data['from_email'] = None
         mail = Mail.objects.create(**validated_data)
         for f in files:
             MailAttachment.objects.create(mail=mail, file=f, filename=f.name)
