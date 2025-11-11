@@ -52,6 +52,75 @@ class Lead(models.Model):
         ('sql', 'Sales Qualified Lead (SQL)'),
     ]
     
+    STAGE_CHOICES = [
+        ('cold', 'Cold'),
+        ('warm', 'Warm'),
+        ('hot', 'Hot'),
+        ('converted', 'Converted'),
+    ]
+
+    # Booth Size Choices (ex GST)
+    BOOTH_SIZE_CHOICES = [
+        # Regional Expos
+        ('regional_wing_2x2', 'Wing Booth 2m x 2m $750'),
+        ('regional_outer_2x3', 'Outer Booth 2m x 3m $900'),
+        ('regional_inner_3x3', 'Inner Booth 3m x 3m $1,500'),
+        ('regional_gold_4x4', 'Gold 4m x 4m $4,500'),
+        ('regional_gold_plus_5x4', 'Gold Plus 5m x 4m $5,500'),
+        ('regional_platinum_6x5', 'Platinum 6m x 5m $8,000'),
+        ('regional_open_6x6', 'Open Stand 6m x 6m $5,000'),
+        ('regional_open_xl_9x3', 'Open Stand XL 9m x 3m $7,000'),
+        ('regional_product_6x3', 'Product Space 6m x 3m $4,000'),
+        # Major Cities Expos
+        ('major_wing_2x2', 'Wing Booth 2m x 2m $850'),
+        ('major_outer_2x3', 'Outer Booth 2m x 3m $1,000'),
+        ('major_inner_3x3', 'Inner Booth 3m x 3m $2,000'),
+        ('major_gold_4x4', 'Gold 4m x 4m $5,500'),
+        ('major_gold_plus_5x4', 'Gold Plus 5m x 4m $6,500'),
+        ('major_platinum_6x5', 'Platinum 6m x 5m $11,000'),
+        ('major_open_6x6', 'Open Stand 6m x 6m $6,000'),
+        ('major_open_xl_9x3', 'Open Stand XL 9m x 3m $8,000'),
+        ('major_product_6x3', 'Product Space 6m x 3m $5,000'),
+        # Melbourne Two Day
+        ('mel_wing_2x2', 'Wing Booth 2m x 2m $950'),
+        ('mel_outer_2x3', 'Outer Booth 2m x 3m $1,100'),
+        ('mel_inner_3x3', 'Inner Booth 3m x 3m $2,500'),
+        ('mel_gold_4x4', 'Gold 4m x 4m $6,500'),
+        ('mel_gold_plus_5x4', 'Gold Plus 5m x 4m $7,500'),
+        ('mel_platinum_6x5', 'Platinum 6m x 5m $15,000'),
+        ('mel_open_6x6', 'Open Stand 6m x 6m $7,000'),
+        ('mel_open_xl_9x3', 'Open Stand XL 9m x 3m $8,500'),
+        ('mel_product_6x3', 'Product Space 6m x 3m $6,000'),
+    ]
+    
+    SPONSORSHIP_TYPE_CHOICES = [
+        ('platinum_sponsor', 'Platinum Sponsor'),
+        ('gold_plus_sponsor', 'Gold Plus Sponsor'),
+        ('gold_sponsor', 'Gold Sponsor'),
+        ('photobooth_sponsor', 'Photobooth Sponsor'),
+        ('spin_the_wheel_sponsor', 'Spin the Wheel Sponsor'),
+        ('prize_sponsor', 'Prize Sponsor'),
+        ('coffee_and_drink_sponsor', 'Coffee and Drink Sponsor'),
+        ('provider_networking_sponsor', 'Provider Networking Sponsor'),
+    ]
+
+    # Tags Choices
+    TAG_CHOICES = [
+        ('Sunshine_Coast', 'Sunshine Coast 28 Feb 2026'),
+        ('Canberra', 'Canberra Mar 2026'),
+        ('Devonport', 'Devonport 21 Apr 2026'),
+        ('Burnie', 'Burnie 22 Apr 2026'),
+        ('Launceston', 'Launceston 24 Apr 2026'),
+        ('Rockhampton', 'Rockhampton 8 May 2026'),
+        ('Townsville', 'Townsville 12 May 2026'),
+        ('Bendigo', 'Bendigo 16 Jun 2026'),
+        ('Gold Coast', 'Gold Coast 19 May 2026'),
+        ('Hobart', 'Hobart 17 to 18 Jul 2026 (Two Day)'),
+        ('Adelaide', 'Adelaide 4 Aug 2026'),
+        ('Newcastle', 'Newcastle Sept 2026'),
+        ('Sydney', 'Sydney Sept 2026'),
+        ('Melbourne', 'Melbourne 20 Jun 2026 (Two Day)'),
+    ]
     # Personal Information
     title = models.CharField(
         max_length=10,
@@ -110,6 +179,7 @@ class Lead(models.Model):
     )
     booth_size = models.CharField(
         max_length=100,
+        choices=BOOTH_SIZE_CHOICES,
         blank=True,
         null=True,
         help_text="Booth size preference"
@@ -203,6 +273,7 @@ class Lead(models.Model):
 
     lead_stage = models.CharField(
         max_length=200,
+        choices=STAGE_CHOICES,
         blank=True,
         null=True,
         help_text="Lead stage"
@@ -330,7 +401,8 @@ class LeadTag(models.Model):
     name = models.CharField(
         max_length=200,
         unique=True,
-        help_text="Name of the tag"
+        choices=Lead.TAG_CHOICES,
+        help_text="Name of the tag (must be from event list)"
     )
     is_deleted = models.BooleanField(
         default=False,
@@ -355,7 +427,8 @@ class SponsorshipType(models.Model):
     name = models.CharField(
         max_length=200,
         unique=True,
-        help_text="Name of the sponsorship type"
+        choices=Lead.SPONSORSHIP_TYPE_CHOICES,
+        help_text="Name of the sponsorship type (must be from predefined list)"
     )
     is_deleted = models.BooleanField(
         default=False,
