@@ -65,7 +65,7 @@ class MailViewSet(viewsets.ModelViewSet):
             return Employee.objects.filter(id=user.id).first()
         return None
 
-    def _send_email(self, mail_instance):
+    def _send_email(self, mail_instance): 
         """
         Send email using Django's email backend.
         All emails are sent from DEFAULT_FROM_EMAIL configured in settings.
