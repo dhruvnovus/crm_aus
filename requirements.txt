@@ -13,6 +13,6 @@ django-cors-headers==4.3.1
 Pillow
 python-dotenv
 gunicorn==21.2.0
-gevent==24.2.1
+gevent>=25.5.1
 whitenoise==6.6.0
 openpyxl==3.1.2
