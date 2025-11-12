@@ -140,20 +140,21 @@ def event_stream(user_id: int, event_queue: queue.Queue):
     event_id = 0
     
     # Send initial connection message
-    yield format_sse_event(
+    initial_event = format_sse_event(
         event_id=event_id,
         event_type='connected',
         data={'message': 'Connected to notification stream', 'user_id': user_id},
         retry_ms=3000,  # advise clients to retry after 3s if disconnected
     )
+    yield initial_event
     event_id += 1
     
-    # Keep-alive ping every 5 seconds
+    # Keep-alive ping every 30 seconds (Heroku router timeout is 55s, so we stay well under)
     last_ping = time.time()
-    PING_INTERVAL = 5
-    # Separate lightweight heartbeat (comment) every 10 seconds to defeat buffering proxies
+    PING_INTERVAL = 30
+    # Separate lightweight heartbeat (comment) every 20 seconds to defeat buffering proxies
     last_heartbeat = time.time()
-    HEARTBEAT_INTERVAL = 10
+    HEARTBEAT_INTERVAL = 20
     
     while True:
         try:
@@ -161,23 +162,25 @@ def event_stream(user_id: int, event_queue: queue.Queue):
             try:
                 event = event_queue.get(timeout=1)
                 # Immediately format and yield the event when received
-                yield format_sse_event(
+                event_data = format_sse_event(
                     event_id=event_id,
                     event_type=event.get('type', 'notification'),
                     data=event.get('data', {}),
                     retry_ms=3000,
                 )
+                yield event_data
                 event_id += 1
             except queue.Empty:
                 # Send ping if interval has passed
                 current_time = time.time()
                 if current_time - last_ping >= PING_INTERVAL:
-                    yield format_sse_event(
+                    ping_data = format_sse_event(
                         event_id=event_id,
                         event_type='ping',
-                        data={'message': 'keep-alive'},
+                        data={'message': 'keep-alive', 'timestamp': current_time},
                         retry_ms=3000,
                     )
+                    yield ping_data
                     event_id += 1
                     last_ping = current_time
                 
@@ -185,7 +188,8 @@ def event_stream(user_id: int, event_queue: queue.Queue):
                 if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
                     # Comment lines in SSE start with ":" and end with double newline
                     # They are ignored by clients but keep the connection active and bypass buffering
-                    yield ": heartbeat\n\n"
+                    heartbeat = f": heartbeat {int(current_time)}\n\n"
+                    yield heartbeat
                     last_heartbeat = current_time
                 continue
             
@@ -195,12 +199,13 @@ def event_stream(user_id: int, event_queue: queue.Queue):
             break
         except Exception as e:
             # Send error event
-            yield format_sse_event(
+            error_data = format_sse_event(
                 event_id=event_id,
                 event_type='error',
                 data={'error': str(e)},
                 retry_ms=3000,
             )
+            yield error_data
             event_id += 1
             break
 

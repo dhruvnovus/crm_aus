@@ -1,1 +1,1 @@
-web: gunicorn crm.wsgi --log-file - --timeout 90 --workers 2
+web: gunicorn crm.wsgi --log-file - --timeout 120 --workers 2 --worker-class gevent --worker-connections 1000

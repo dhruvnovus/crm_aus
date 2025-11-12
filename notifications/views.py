@@ -324,11 +324,12 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             content_type='text/event-stream; charset=utf-8'
         )
         
-        # Set headers for SSE
+        # Set headers for SSE and Heroku compatibility
         response['Cache-Control'] = 'no-cache, no-transform'
-        response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx
-        # Note: 'Connection: keep-alive' is handled automatically by the server
-        # and cannot be set manually in WSGI responses
+        response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx/proxies
+        response['Connection'] = 'keep-alive'
+        # Heroku-specific: prevent router timeout by ensuring regular data flow
+        response['X-Content-Type-Options'] = 'nosniff'
         
         return response
 
