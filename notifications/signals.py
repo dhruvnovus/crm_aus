@@ -163,27 +163,43 @@ def create_task_assignment_notification(task, is_new=False):
         title = f'New Task Assigned: {task.title}' if is_new else f'Task Assigned: {task.title}'
         message = f'A new task "{task.title}" has been assigned to you.' if is_new else f'Task "{task.title}" has been assigned to you.'
         
-        notification = Notification.objects.create(
-            user=task.assigned_to,
-            notification_type='task_assignment',
-            title=title,
-            message=message,
-            task_id=task.id,
-            metadata={
-                'priority': task.priority,
-                'due_date': str(task.due_date),
-                'due_time': str(task.due_time),
-                'status': task.status,
-            }
-        )
-        
-        # Publish SSE event for real-time notification
-        notification_data = _serialize_notification_for_sse(notification)
-        publisher.publish(
-            user_id=task.assigned_to.id,
-            event_type='notification',
-            data=notification_data
-        )
+        try:
+            notification = Notification.objects.create(
+                user=task.assigned_to,
+                notification_type='task_assignment',
+                title=title,
+                message=message,
+                task_id=task.id,
+                metadata={
+                    'priority': task.priority,
+                    'due_date': str(task.due_date),
+                    'due_time': str(task.due_time),
+                    'status': task.status,
+                }
+            )
+            
+            # Publish SSE event for real-time notification
+            try:
+                notification_data = _serialize_notification_for_sse(notification)
+                publisher.publish(
+                    user_id=task.assigned_to.id,
+                    event_type='notification',
+                    data=notification_data
+                )
+                # Debug logging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Published SSE notification for employee_id={task.assigned_to.id}, notification_id={notification.id}, task_id={task.id}")
+            except Exception as e:
+                # Log error but don't fail notification creation
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to publish SSE event for notification {notification.id}: {str(e)}", exc_info=True)
+        except Exception as e:
+            # Log error if notification creation fails
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create task assignment notification for task_id={task.id}, assigned_to_id={task.assigned_to.id}: {str(e)}", exc_info=True)
 
 
 def create_task_reminder_notification(reminder):

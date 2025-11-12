@@ -289,25 +289,48 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         - Via Authorization header: Bearer <token> (for non-browser clients)
         - Via query parameter: ?token=<jwt_token> (for browser EventSource API)
         """
-        # Get authenticated employee (use existing method from ViewSet)
-        employee = self.get_authenticated_employee()
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # If not authenticated via ViewSet auth, try token from query parameter
-        if not employee:
+        employee = None
+        token = None
+        
+        # Try to get token from Authorization header first
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        # Fallback to query parameter if no Authorization header
+        if not token:
             token = request.query_params.get('token')
-            if token:
-                try:
-                    untyped_token = UntypedToken(token)
-                    user_id = getattr(untyped_token, 'payload', {}).get('user_id')
-                    if user_id:
-                        django_user = User.objects.get(id=user_id)
-                        employee = Employee.objects.filter(email=django_user.username, is_active=True).first()
-                        if not employee:
-                            employee = Employee.objects.filter(email=django_user.email, is_active=True).first()
-                        if not employee:
-                            employee = Employee.objects.filter(id=user_id, is_active=True).first()
-                except Exception:
-                    pass
+        
+        if token:
+            try:
+                untyped_token = UntypedToken(token)
+                user_id = getattr(untyped_token, 'payload', {}).get('user_id')
+                logger.debug(f"Stream: Resolving employee from Django User ID {user_id}")
+                if user_id:
+                    django_user = User.objects.get(id=user_id)
+                    # Find Employee by email (since login creates User with email as username)
+                    employee = Employee.objects.filter(email=django_user.username, is_active=True).first()
+                    if not employee:
+                        employee = Employee.objects.filter(email=django_user.email, is_active=True).first()
+                    if not employee:
+                        # Last resort: try direct ID match (in case Employee ID matches User ID)
+                        employee = Employee.objects.filter(id=user_id, is_active=True).first()
+                    if employee:
+                        logger.info(f"Stream: Resolved Employee ID {employee.id} from Django User ID {user_id}")
+                    else:
+                        logger.warning(f"Stream: Could not resolve Employee from Django User ID {user_id} (email: {django_user.username or django_user.email})")
+            except User.DoesNotExist:
+                logger.warning(f"Stream: Django User with ID {user_id} not found")
+            except Exception as e:
+                logger.error(f"Stream: Error resolving employee from token: {str(e)}", exc_info=True)
+        else:
+            # Try ViewSet authentication as fallback
+            employee = self.get_authenticated_employee()
+            if employee:
+                logger.info(f"Stream: Resolved Employee ID {employee.id} via ViewSet authentication")
         
         if not employee:
             return Response(
@@ -315,12 +338,14 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
-        # Subscribe to notification events
-        event_queue = publisher.subscribe(employee.id)
+        # Subscribe to notification events using Employee ID
+        employee_id = employee.id
+        logger.info(f"Stream: Subscribing to notifications for Employee ID {employee_id}")
+        event_queue = publisher.subscribe(employee_id)
         
         # Create SSE response
         response = StreamingHttpResponse(
-            event_stream(employee.id, event_queue),
+            event_stream(employee_id, event_queue),
             content_type='text/event-stream; charset=utf-8'
         )
         

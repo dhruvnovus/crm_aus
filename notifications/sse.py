@@ -5,15 +5,44 @@ import json
 import queue
 import threading
 import time
-from typing import Dict
+import os
+from typing import Dict, Optional
 from django.http import StreamingHttpResponse
 from django.utils import timezone
+
+# Try to import Redis, fall back to in-memory if not available
+_redis_available = False
+_redis_client = None
+_redis_pubsub = None
+
+try:
+    import redis
+    # Try to connect to Redis (check for Heroku Redis URL or default)
+    redis_url = os.getenv('REDIS_URL') or os.getenv('REDISCLOUD_URL') or 'redis://localhost:6379/0'
+    try:
+        _redis_client = redis.from_url(redis_url, decode_responses=True)
+        # Test connection
+        _redis_client.ping()
+        _redis_available = True
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Redis connected successfully for notification pub-sub")
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Redis not available, falling back to in-memory pub-sub: {str(e)}")
+        _redis_available = False
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning("Redis package not installed, falling back to in-memory pub-sub")
 
 
 class NotificationEventPublisher:
     """
-    Simple in-memory pub-sub system for notification events.
-    Uses per-user queues to deliver notifications via SSE.
+    Hybrid pub-sub system for notification events.
+    Uses Redis pub-sub when available (for multi-worker production),
+    falls back to in-memory queues for single-process development.
     """
     _instance = None
     _lock = threading.Lock()
@@ -25,6 +54,8 @@ class NotificationEventPublisher:
                     cls._instance = super().__new__(cls)
                     cls._instance._queues: Dict[int, queue.Queue] = {}
                     cls._instance._lock = threading.Lock()
+                    cls._instance._use_redis = _redis_available
+                    cls._instance._redis_client = _redis_client
         return cls._instance
     
     def subscribe(self, user_id: int) -> queue.Queue:
@@ -32,10 +63,70 @@ class NotificationEventPublisher:
         Subscribe a user to receive notification events.
         Returns a queue that will receive notification events.
         """
-        with self._lock:
-            if user_id not in self._queues:
-                self._queues[user_id] = queue.Queue(maxsize=100)
+        if self._use_redis and self._redis_client:
+            # For Redis, we still use a local queue to receive messages from Redis subscriber
+            with self._lock:
+                if user_id not in self._queues:
+                    self._queues[user_id] = queue.Queue(maxsize=100)
+                    # Start Redis subscriber thread for this user
+                    self._start_redis_subscriber(user_id)
             return self._queues[user_id]
+        else:
+            # In-memory queue
+            with self._lock:
+                if user_id not in self._queues:
+                    self._queues[user_id] = queue.Queue(maxsize=100)
+            return self._queues[user_id]
+    
+    def _start_redis_subscriber(self, user_id: int):
+        """Start a background thread to subscribe to Redis channel for this user"""
+        def redis_subscriber():
+            # Create a separate Redis connection for subscriber (required for pubsub)
+            redis_url = os.getenv('REDIS_URL') or os.getenv('REDISCLOUD_URL') or 'redis://localhost:6379/0'
+            try:
+                subscriber_client = redis.from_url(redis_url, decode_responses=True)
+                pubsub = subscriber_client.pubsub()
+                channel = f"notifications:user:{user_id}"
+                pubsub.subscribe(channel)
+                
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Redis subscriber started for user_id={user_id}, channel={channel}")
+                
+                for message in pubsub.listen():
+                    if message['type'] == 'message':
+                        try:
+                            event_data = json.loads(message['data'])
+                            # Put event into local queue
+                            with self._lock:
+                                if user_id in self._queues:
+                                    try:
+                                        self._queues[user_id].put_nowait(event_data)
+                                    except queue.Full:
+                                        # Remove oldest if full
+                                        try:
+                                            self._queues[user_id].get_nowait()
+                                            self._queues[user_id].put_nowait(event_data)
+                                        except queue.Empty:
+                                            pass
+                        except Exception as e:
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.error(f"Error processing Redis message for user_id={user_id}: {str(e)}", exc_info=True)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Redis subscriber error for user_id={user_id}: {str(e)}", exc_info=True)
+            finally:
+                try:
+                    pubsub.close()
+                    subscriber_client.close()
+                except:
+                    pass
+        
+        # Start subscriber thread
+        thread = threading.Thread(target=redis_subscriber, daemon=True)
+        thread.start()
     
     def unsubscribe(self, user_id: int):
         """
@@ -43,6 +134,7 @@ class NotificationEventPublisher:
         """
         with self._lock:
             self._queues.pop(user_id, None)
+            # Note: Redis subscription will be cleaned up when thread exits
     
     def publish(self, user_id: int, event_type: str, data: dict):
         """
@@ -59,29 +151,43 @@ class NotificationEventPublisher:
             'timestamp': timezone.now().isoformat(),
         }
         
-        with self._lock:
-            if user_id in self._queues:
-                try:
-                    self._queues[user_id].put_nowait(event)
-                    # Debug logging
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.debug(f"Published event to user_id={user_id}, event_type={event_type}, queue_size={self._queues[user_id].qsize()}")
-                except queue.Full:
-                    # If queue is full, remove oldest event and add new one
-                    try:
-                        self._queues[user_id].get_nowait()
-                        self._queues[user_id].put_nowait(event)
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.warning(f"Queue full for user_id={user_id}, removed oldest event")
-                    except queue.Empty:
-                        pass
-            else:
-                # Log if user is not subscribed
+        if self._use_redis and self._redis_client:
+            # Publish to Redis channel
+            try:
+                channel = f"notifications:user:{user_id}"
+                self._redis_client.publish(channel, json.dumps(event))
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.debug(f"User {user_id} is not subscribed to notification stream (no active SSE connection)")
+                logger.debug(f"Published event to Redis channel={channel}, event_type={event_type}")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to publish to Redis for user_id={user_id}: {str(e)}", exc_info=True)
+        else:
+            # In-memory publish
+            with self._lock:
+                if user_id in self._queues:
+                    try:
+                        self._queues[user_id].put_nowait(event)
+                        # Debug logging
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.debug(f"Published event to user_id={user_id}, event_type={event_type}, queue_size={self._queues[user_id].qsize()}")
+                    except queue.Full:
+                        # If queue is full, remove oldest event and add new one
+                        try:
+                            self._queues[user_id].get_nowait()
+                            self._queues[user_id].put_nowait(event)
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.warning(f"Queue full for user_id={user_id}, removed oldest event")
+                        except queue.Empty:
+                            pass
+                else:
+                    # Log if user is not subscribed
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"User {user_id} is not subscribed to notification stream (no active SSE connection)")
 
 
 # Global publisher instance
