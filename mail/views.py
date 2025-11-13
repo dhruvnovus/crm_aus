@@ -5,10 +5,10 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
-from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
 from .models import Mail, MailAttachment
 from .serializers import MailSerializer, CreateTaskFromMailSerializer
+from .email_service import send_email_via_smtp2go
 from task.models import Task, TaskAttachment, TaskHistory, TaskReminder
 from notifications.signals import create_task_reminder_notification, create_task_assignment_notification
 from task.serializers import TaskSerializer
@@ -67,9 +67,8 @@ class MailViewSet(viewsets.ModelViewSet):
 
     def _send_email(self, mail_instance): 
         """
-        Send email using Django's email backend.
+        Send email using SMTP2GO API.
         All emails are sent from DEFAULT_FROM_EMAIL configured in settings.
-        Similar to forgot_password implementation.
         """
         if not mail_instance.to_emails:
             logger.warning(f"Mail {mail_instance.id}: Cannot send email - to_emails is empty")
@@ -85,46 +84,48 @@ class MailViewSet(viewsets.ModelViewSet):
             logger.error(f"Mail {mail_instance.id}: Cannot send email - DEFAULT_FROM_EMAIL is not configured in settings")
             return False
         
-        # Check email backend
-        email_backend = getattr(settings, 'EMAIL_BACKEND', '')
-        if 'console' in email_backend:
-            logger.warning(f"Mail {mail_instance.id}: Using console email backend - email will be printed to console, not actually sent")
-        
         # Prepare recipients
         recipients = mail_instance.to_emails if isinstance(mail_instance.to_emails, list) else [mail_instance.to_emails]
         cc_recipients = mail_instance.cc_emails if isinstance(mail_instance.cc_emails, list) else (mail_instance.cc_emails if mail_instance.cc_emails else [])
         bcc_recipients = mail_instance.bcc_emails if isinstance(mail_instance.bcc_emails, list) else (mail_instance.bcc_emails if mail_instance.bcc_emails else [])
         
-        logger.info(f"Mail {mail_instance.id}: Attempting to send email from {from_email} to {recipients}")
+        logger.info(f"Mail {mail_instance.id}: Attempting to send email via SMTP2GO from {from_email} to {recipients}")
         
-        # Create email message
-        email = EmailMultiAlternatives(
-            subject=mail_instance.subject,
-            body=mail_instance.body,
-            from_email=from_email,
-            to=recipients,
-            cc=cc_recipients if cc_recipients else None,
-            bcc=bcc_recipients if bcc_recipients else None,
-        )
-        
-        # Attach files if any
+        # Prepare attachments for SMTP2GO
+        attachments = []
         for attachment in mail_instance.attachments.all():
             if attachment.file:
                 try:
                     attachment.file.open('rb')
-                    email.attach(attachment.filename, attachment.file.read(), attachment.content_type)
+                    file_content = attachment.file.read()
                     attachment.file.close()
-                    logger.info(f"Mail {mail_instance.id}: Attached file {attachment.filename}")
+                    
+                    attachments.append({
+                        'filename': attachment.filename,
+                        'content': file_content,
+                        'content_type': attachment.content_type or 'application/octet-stream'
+                    })
+                    logger.info(f"Mail {mail_instance.id}: Prepared attachment {attachment.filename}")
                 except Exception as e:
-                    logger.error(f"Mail {mail_instance.id}: Failed to attach {attachment.filename}: {e}")
+                    logger.error(f"Mail {mail_instance.id}: Failed to read attachment {attachment.filename}: {e}")
         
-        # Send email
-        try:
-            email.send(fail_silently=False)
-            logger.info(f"Mail {mail_instance.id}: Email sent successfully to {recipients}")
+        # Send email via SMTP2GO
+        result = send_email_via_smtp2go(
+            to_emails=recipients,
+            subject=mail_instance.subject,
+            text_body=mail_instance.body,
+            sender_email=from_email,
+            cc_emails=cc_recipients if cc_recipients else None,
+            bcc_emails=bcc_recipients if bcc_recipients else None,
+            attachments=attachments if attachments else None
+        )
+        
+        if result.get('success'):
+            logger.info(f"Mail {mail_instance.id}: Email sent successfully via SMTP2GO to {recipients}")
             return True
-        except Exception as e:
-            logger.error(f"Mail {mail_instance.id}: Failed to send email: {e}", exc_info=True)
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            logger.error(f"Mail {mail_instance.id}: Failed to send email via SMTP2GO: {error_msg}")
             return False
 
     def update(self, request, *args, **kwargs):
