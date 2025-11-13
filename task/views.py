@@ -81,6 +81,88 @@ class TaskViewSet(viewsets.ModelViewSet):
         return None
 
     @extend_schema(
+        summary="Get my tasks",
+        description="Get all tasks assigned to the current authenticated user",
+        tags=["Tasks"],
+        responses={200: TaskSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='my_tasks')
+    def my_tasks(self, request):
+        """Get all tasks assigned to the current user"""
+        # Get the employee linked to this user by email (Employee and User are linked by email)
+        user_email = getattr(request.user, 'email', None) or getattr(request.user, 'username', None)
+        if not user_email:
+            return Response(
+                {'detail': 'User email not found.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        employee = Employee.objects.filter(email=user_email, is_active=True).first()
+        if not employee:
+            return Response(
+                {'detail': 'No employee record found for this user.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        qs = self.get_queryset().filter(assigned_to=employee)
+        
+        # Apply pagination
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+
+    @extend_schema(
+        summary="Get tasks due today",
+        description="Get all tasks that are due today",
+        tags=["Tasks"],
+        responses={200: TaskSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='due_today')
+    def due_today(self, request):
+        """Get all tasks due today"""
+        today = timezone.localdate()
+        qs = self.get_queryset().filter(due_date=today)
+        
+        # Apply pagination
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+
+    @extend_schema(
+        summary="Get overdue tasks",
+        description="Get all tasks that are overdue (not completed and due date is in the past)",
+        tags=["Tasks"],
+        responses={200: TaskSerializer(many=True)},
+    )
+    @action(detail=False, methods=['get'], url_path='overdue')
+    def overdue(self, request):
+        """Get all overdue tasks (not completed and due date < today)"""
+        today = timezone.localdate()
+        qs = self.get_queryset().filter(
+            ~Q(status='completed'),
+            due_date__lt=today
+        )
+        
+        # Apply pagination
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @extend_schema(
         summary="Mark task as completed",
         description="Mark a task as completed",
         tags=["Tasks"],
