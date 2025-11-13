@@ -95,16 +95,22 @@ def send_email_via_smtp2go(
                 else:
                     # If content is already a string, assume it's base64
                     content_base64 = attachment['content']
+                content_type = attachment.get('content_type') or 'application/octet-stream'
                 
+                # SMTP2GO expects attachment keys: name, type, data
+                filename = attachment['filename'] or 'attachment'
                 attachment_dict = {
-                    "filename": attachment['filename'],
+                    # Official SMTP2GO fields
+                    "filename": filename,
+                    "mimetype": content_type,
+                    "fileblob": content_base64,
+                    # Additional aliases for compatibility
+                    "name": filename,
+                    "type": content_type,
+                    "data": content_base64,
+                    "filetype": content_type,
                     "filecontent": content_base64,
                 }
-                
-                # Add content type if provided
-                if 'content_type' in attachment:
-                    attachment_dict["filetype"] = attachment['content_type']
-                
                 attachment_list.append(attachment_dict)
         
         if attachment_list:
