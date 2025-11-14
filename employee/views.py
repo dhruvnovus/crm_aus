@@ -4,6 +4,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count, F, Value, CharField
@@ -90,8 +91,9 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     """
     queryset = Employee.objects.all()
     pagination_class = EmployeePagination
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['account_type', 'staff_type', 'is_active', 'is_resigned', 'gender']
+    filterset_fields = ['role', 'staff_type', 'is_active', 'is_resigned', 'gender']
     search_fields = ['first_name', 'last_name', 'email', 'position', 'mobile_no', 'address']
     ordering_fields = ['created_at', 'updated_at', 'first_name', 'last_name', 'full_name', 'full_name_ordering', 'email']
     ordering = ['-created_at']

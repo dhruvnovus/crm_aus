@@ -91,7 +91,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     status_display = serializers.ReadOnlyField()
     # account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
     staff_type_display = serializers.CharField(source='get_staff_type_display', read_only=True)
-    profile_image = Base64ImageField(required=False)
+    profile_image = serializers.ImageField(required=False, allow_null=True)
     role = RoleBasicSerializer(read_only=True)
     
     class Meta:
@@ -118,7 +118,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     title_display = serializers.CharField(source='get_title_display', read_only=True)
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
     emergency_contacts = EmergencyContactSerializer(many=True, read_only=True)
-    profile_image = Base64ImageField(required=False)
+    profile_image = serializers.ImageField(required=False, allow_null=True)
     role = serializers.SerializerMethodField()
 
     class Meta:
@@ -159,7 +159,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
     Serializer for Employee create and update operations
     """
     emergency_contacts = EmergencyContactSerializer(many=True, required=False)
-    profile_image = Base64ImageField(required=False)
+    profile_image = serializers.ImageField(required=False, allow_null=True)
     role_id = serializers.IntegerField(required=False, allow_null=True)
     
     class Meta:
@@ -271,10 +271,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         # Remove password from validated_data - handle separately
         password = validated_data.pop('password', None)
         
-        # Handle profile_image - update if provided, otherwise keep existing
-        profile_image_data = validated_data.pop('profile_image', None)
-        
-        # Update employee fields
+        # Update employee fields (profile_image will be handled automatically by ImageField)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
@@ -287,10 +284,6 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         # Only update password if a new one was provided
         if password is not None:
             instance.password = password
-        
-        # Only update profile_image if provided (None means keep existing, empty string means clear it)
-        if profile_image_data is not None:
-            instance.profile_image = profile_image_data
         
         instance.save()
         

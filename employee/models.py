@@ -7,6 +7,16 @@ from django.utils.crypto import get_random_string
 import uuid
 
 
+def employee_profile_image_upload_path(instance, filename):
+    """Generate upload path for employee profile images: employee_profile_images/employee_{employee_id}/{filename}"""
+    # Use ID if available, otherwise use a temporary identifier
+    employee_id = getattr(instance, 'id', None)
+    if employee_id:
+        return f'employee_profile_images/employee_{employee_id}/{filename}'
+    # For new instances, use a temporary path (will be moved/renamed after save)
+    return f'employee_profile_images/temp/{filename}'
+
+
 class Employee(models.Model):
     """
     Employee model for CRM system with account types: Super Admin and Sales Staff
@@ -158,10 +168,11 @@ class Employee(models.Model):
     )
     
     # Profile & Notes
-    profile_image = models.TextField(
+    profile_image = models.ImageField(
+        upload_to=employee_profile_image_upload_path,
         blank=True,
         null=True,
-        help_text="Employee's profile image as Base64 string"
+        help_text="Employee's profile image"
     )
     admin_notes = models.TextField(
         blank=True,
