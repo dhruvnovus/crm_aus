@@ -9,12 +9,18 @@ from .models import Employee, EmployeeHistory
 
 def serialize_value(value):
     """
-    Convert datetime/date objects to strings for JSON serialization
+    Convert datetime/date objects and model instances to strings/IDs for JSON serialization
     """
+    if value is None:
+        return None
     if isinstance(value, datetime):
-        return value.isoformat() if value else None
+        return value.isoformat()
     elif isinstance(value, date):
-        return value.isoformat() if value else None
+        return value.isoformat()
+    # Handle model instances (like Role, ForeignKey relationships)
+    elif hasattr(value, 'pk'):
+        # Return the primary key for model instances
+        return value.pk
     return value
 
 
@@ -26,7 +32,7 @@ def build_changes_dict(instance: Employee, created: bool, update_fields=None):
             'account_type', 'staff_type', 'is_active', 'is_resigned', 'title',
             'first_name', 'last_name', 'email', 'position', 'gender'
         ]:
-            value = getattr(instance, field)
+            value = getattr(instance, field, None)
             changes[field] = {'from': None, 'to': serialize_value(value)}
         return changes
     

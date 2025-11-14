@@ -44,8 +44,17 @@ class Employee(models.Model):
     account_type = models.CharField(
         max_length=20,
         choices=ACCOUNT_TYPE_CHOICES,
-        default='sales_staff',
+        null=True,
+        blank=True,
         help_text="Account type: Super Admin or Sales Staff"
+    )
+    role = models.ForeignKey(
+        'role.Role',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employees',
+        help_text="Role assigned to this employee"
     )
     staff_type = models.CharField(
         max_length=20,
@@ -238,6 +247,81 @@ class Employee(models.Model):
         except Employee.DoesNotExist:
             pass
         return None
+    
+    def has_permission(self, module, action):
+        """
+        Check if employee has permission for a module and action.
+        Super admins have all permissions.
+        """
+        # Super admins have all permissions
+        if self.account_type == 'super_admin':
+            return True
+        
+        # Check role permissions
+        if self.role and self.role.is_active:
+            from role.models import RolePermission
+            return RolePermission.objects.filter(
+                role=self.role,
+                permission__module=module,
+                permission__action=action
+            ).exists()
+        
+        return False
+    
+    def get_permissions(self):
+        """
+        Get all permissions for this employee as a list of dicts.
+        Super admins get all permissions.
+        """
+        from role.models import Permission, RolePermission
+        
+        # Get module display names
+        module_display_map = dict(Permission.MODULE_CHOICES)
+        
+        # Get all permissions (flat list)
+        if self.account_type == 'super_admin':
+            permissions_list = [
+                {'module': module, 'action': action}
+                for module, _ in Permission.MODULE_CHOICES
+                for action, _ in Permission.ACTION_CHOICES
+            ]
+        else:
+            # Get permissions from role
+            if not self.role or not self.role.is_active:
+                return []
+            
+            permissions_list = [
+                {'module': rp.permission.module, 'action': rp.permission.action}
+                for rp in RolePermission.objects.filter(role=self.role).select_related('permission')
+            ]
+        
+        # Group permissions by module
+        permissions_by_module = {}
+        for perm in permissions_list:
+            module = perm['module']
+            action = perm['action']
+            
+            if module not in permissions_by_module:
+                permissions_by_module[module] = {
+                    'module': module_display_map.get(module, module.title()),
+                    'can_create': False,
+                    'can_read': False,
+                    'can_update': False,
+                    'can_delete': False
+                }
+            
+            # Set the appropriate flag based on action
+            if action == 'create':
+                permissions_by_module[module]['can_create'] = True
+            elif action == 'read':
+                permissions_by_module[module]['can_read'] = True
+            elif action == 'update':
+                permissions_by_module[module]['can_update'] = True
+            elif action == 'delete':
+                permissions_by_module[module]['can_delete'] = True
+        
+        # Return as list
+        return list(permissions_by_module.values())
 
 
 class EmergencyContact(models.Model):

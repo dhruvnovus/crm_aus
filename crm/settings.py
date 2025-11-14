@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'task',
     'notifications',
     'mail',
+    'role',
 ]
 
 MIDDLEWARE = [

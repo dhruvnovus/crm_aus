@@ -6,7 +6,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q, Count
+from django.db.models import Q, Count, F, Value, CharField
+from django.db.models.functions import Concat
 from django.db import transaction, IntegrityError
 from django.http import Http404
 from django.core.mail import send_mail
@@ -92,7 +93,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['account_type', 'staff_type', 'is_active', 'is_resigned', 'gender']
     search_fields = ['first_name', 'last_name', 'email', 'position', 'mobile_no', 'address']
-    ordering_fields = ['created_at', 'updated_at', 'first_name', 'last_name', 'email']
+    ordering_fields = ['created_at', 'updated_at', 'first_name', 'last_name', 'full_name', 'full_name_ordering', 'email']
     ordering = ['-created_at']
     
     def get_serializer_class(self):
@@ -112,7 +113,15 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         query parameters in the URL.
         """
         # Filter out deleted records by default
-        queryset = Employee.objects.filter(is_deleted=False)
+        # Annotate full_name_ordering for database-level ordering (different name to avoid @property conflict)
+        queryset = Employee.objects.filter(is_deleted=False).annotate(
+            full_name_ordering=Concat(
+                F('first_name'),
+                Value(' '),
+                F('last_name'),
+                output_field=CharField()
+            )
+        )
         
         # Filter by account type if specified
         account_type = self.request.query_params.get('account_type', None)
@@ -127,6 +136,38 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_active=False, is_resigned=False)
         elif status_filter == 'resigned':
             queryset = queryset.filter(is_resigned=True)
+        
+        return queryset
+    
+    def filter_queryset(self, queryset):
+        """
+        Override to handle full_name ordering by mapping it to full_name_ordering annotation
+        """
+        # Get ordering parameter
+        ordering_param = self.request.query_params.get('ordering', '')
+        
+        # If ordering includes full_name, handle it manually
+        # because full_name is a @property, not a database field
+        if ordering_param and 'full_name' in ordering_param and 'full_name_ordering' not in ordering_param:
+            # Temporarily remove full_name from ordering_fields to avoid OrderingFilter error
+            original_ordering_fields = self.ordering_fields
+            self.ordering_fields = [f for f in self.ordering_fields if f != 'full_name']
+            
+            # Call super() to apply other filters (without full_name ordering)
+            queryset = super().filter_queryset(queryset)
+            
+            # Restore ordering_fields
+            self.ordering_fields = original_ordering_fields
+            
+            # Now apply full_name ordering manually using full_name_ordering annotation
+            # Replace full_name with full_name_ordering in the ordering string
+            modified_ordering = ordering_param.replace('full_name', 'full_name_ordering')
+            # Split by comma to handle multiple ordering fields
+            order_fields = [field.strip() for field in modified_ordering.split(',')]
+            queryset = queryset.order_by(*order_fields)
+        else:
+            # No full_name in ordering, use normal flow
+            queryset = super().filter_queryset(queryset)
         
         return queryset
     

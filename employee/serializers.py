@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 import base64
 import uuid
+from role.models import Role
 from .models import Employee, EmergencyContact, EmployeeHistory, PasswordResetToken
 
 
@@ -70,23 +71,37 @@ class EmergencyContactSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
 
+class RoleBasicSerializer(serializers.ModelSerializer):
+    """
+    Basic role serializer for including in employee response
+    """
+    name_display = serializers.CharField(source='get_name_display', read_only=True)
+    
+    class Meta:
+        model = Role
+        fields = ['id', 'name', 'name_display', 'display_name', 'description', 'is_active']
+        read_only_fields = ['id', 'name', 'name_display', 'display_name', 'description', 'is_active']
+
+
 class EmployeeListSerializer(serializers.ModelSerializer):
     """
     Serializer for Employee list view (minimal fields for performance)
     """
     full_name = serializers.ReadOnlyField()
     status_display = serializers.ReadOnlyField()
-    account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
+    # account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
     staff_type_display = serializers.CharField(source='get_staff_type_display', read_only=True)
     profile_image = Base64ImageField(required=False)
+    role = RoleBasicSerializer(read_only=True)
     
     class Meta:
         model = Employee
         fields = [
-            'id', 'account_type', 'account_type_display', 'staff_type', 'staff_type_display',
+            'id', 'account_type', 'staff_type', 'staff_type_display', 
             'is_active', 'is_resigned', 'title', 'first_name', 'last_name', 'full_name',
             'email', 'position', 'gender', 'mobile_no', 'address', 'post_code',
-            'profile_image', 'hours_per_week', 'status_display', 'created_at', 'updated_at', 'is_deleted'
+            'profile_image', 'hours_per_week', 'status_display', 'role',
+            'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
@@ -98,27 +113,45 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     display_name = serializers.ReadOnlyField()
     status_display = serializers.ReadOnlyField()
-    account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
+    # account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
     staff_type_display = serializers.CharField(source='get_staff_type_display', read_only=True)
     title_display = serializers.CharField(source='get_title_display', read_only=True)
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
     emergency_contacts = EmergencyContactSerializer(many=True, read_only=True)
     profile_image = Base64ImageField(required=False)
-    
+    role = serializers.SerializerMethodField()
+
     class Meta:
         model = Employee
         fields = [
-            'id', 'account_type', 'account_type_display', 'staff_type', 'staff_type_display',
+            'id', 'account_type', 'staff_type', 'staff_type_display',
             'is_active', 'is_resigned', 'title', 'title_display', 'first_name', 'last_name',
             'full_name', 'display_name', 'email', 'password', 'position', 'gender', 'gender_display',
             'date_of_birth', 'mobile_no', 'landline_no', 'language_spoken', 'unit_number',
             'address', 'post_code', 'profile_image', 'admin_notes', 'hours_per_week',
-            'status_display', 'emergency_contacts', 'created_at', 'updated_at', 'is_deleted'
+            'status_display', 'emergency_contacts', 'role', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
         extra_kwargs = {
             'password': {'write_only': True}
         }
+    
+    def get_role(self, obj):
+        """Get role information if role is assigned"""
+        if obj.role:
+            return {
+                'id': obj.role.id,
+                'name': obj.role.name,
+                'name_display': obj.role.get_name_display(),
+                'display_name': obj.role.display_name,
+                'description': obj.role.description,
+                'is_active': obj.role.is_active
+            }
+        return None
+    
+    def get_permissions(self, obj):
+        """Get all permissions for this employee"""
+        return obj.get_permissions()
 
 
 class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
@@ -127,6 +160,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
     """
     emergency_contacts = EmergencyContactSerializer(many=True, required=False)
     profile_image = Base64ImageField(required=False)
+    role_id = serializers.IntegerField(required=False, allow_null=True)
     
     class Meta:
         model = Employee
@@ -135,7 +169,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'email', 'password', 'position', 'gender',
             'date_of_birth', 'mobile_no', 'landline_no', 'language_spoken',
             'unit_number', 'address', 'post_code', 'profile_image', 'admin_notes',
-            'hours_per_week', 'emergency_contacts', 'is_deleted'
+            'hours_per_week', 'emergency_contacts', 'role_id', 'is_deleted'
         ]
         read_only_fields = ['is_deleted']
         extra_kwargs = {
@@ -144,7 +178,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'first_name': {'required': True},
             'last_name': {'required': True},
             'gender': {'required': True},
-            'account_type': {'required': True},
+            'account_type': {'required': False},
             'staff_type': {'required': True}
         }
     
@@ -156,6 +190,16 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         if self.instance is not None:  # Updating existing employee
             if Employee.objects.filter(email=value).exclude(id=self.instance.id).exists():
                 raise serializers.ValidationError("An employee with this email already exists.")
+        return value
+
+    def validate_role_id(self, value):
+        """
+        Validate that the provided role exists (if supplied)
+        """
+        if value is None:
+            return value
+        if not Role.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError("Invalid role ID.")
         return value
     
     def validate_password(self, value):
@@ -199,8 +243,13 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         Create employee with emergency contacts
         """
         emergency_contacts_data = validated_data.pop('emergency_contacts', [])
+        role_id = validated_data.pop('role_id', None)
         
         employee = Employee.objects.create(**validated_data)
+
+        if role_id is not None:
+            employee.role_id = role_id
+            employee.save(update_fields=['role'])
         
         # Use bulk_create for better performance instead of individual creates
         if emergency_contacts_data:
@@ -217,6 +266,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         Update employee and emergency contacts
         """
         emergency_contacts_data = validated_data.pop('emergency_contacts', None)
+        role_id = validated_data.pop('role_id', serializers.empty)
         
         # Remove password from validated_data - handle separately
         password = validated_data.pop('password', None)
@@ -227,6 +277,12 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         # Update employee fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        if role_id is not serializers.empty:
+            if role_id is None:
+                instance.role = None
+            else:
+                instance.role_id = role_id
         
         # Only update password if a new one was provided
         if password is not None:
@@ -237,6 +293,9 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             instance.profile_image = profile_image_data
         
         instance.save()
+        
+        # Refresh from database to ensure role relationship is properly loaded
+        instance.refresh_from_db()
         
         if emergency_contacts_data is not None:
             instance.emergency_contacts.all().delete()
