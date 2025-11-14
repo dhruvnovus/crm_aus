@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
     destroy=extend_schema(summary="Delete mail", tags=["Mails"]),
 )
 class MailViewSet(viewsets.ModelViewSet):
-    queryset = Mail.objects.select_related('linked_task', 'linked_task__assigned_to').filter(is_deleted=False)
+    queryset = Mail.objects.select_related('linked_task', 'linked_task__assigned_to').all()
     serializer_class = MailSerializer
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -49,15 +49,29 @@ class MailViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         employee_id = self.request.query_params.get('employee_id')
+        status = self.request.query_params.get('status')
+        
         if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
             if not employee_id:
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
             qs = qs.filter(owner_id=employee_id)
+            
+            # Filter by deletion status based on status parameter
+            # If status is 'trash', show deleted mails (is_deleted=True)
+            # If status is not passed or is any other value, show only non-deleted mails (is_deleted=False)
+            if status == 'trash':
+                qs = qs.filter(is_deleted=True)
+            else:
+                # status is None or any other value (draft, sent, scheduled, starred, etc.)
+                qs = qs.filter(is_deleted=False)
+        
         return qs
 
     def perform_destroy(self, instance):
+        # When mail is deleted, set status to 'trash' and mark as deleted
+        instance.status = 'trash'
         instance.is_deleted = True
-        instance.save(update_fields=['is_deleted', 'updated_at'])
+        instance.save(update_fields=['status', 'is_deleted', 'updated_at'])
 
     def _actor(self):
         user = getattr(self.request, 'user', None)

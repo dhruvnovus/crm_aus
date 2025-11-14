@@ -17,6 +17,8 @@ class Mail(models.Model):
         ('draft', 'Draft'),
         ('sent', 'Sent'),
         ('scheduled', 'Scheduled'),
+        ('starred', 'Starred'),
+        ('trash', 'Trash'),
     ]
 
     owner = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mails')
