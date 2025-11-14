@@ -60,29 +60,35 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
 class CustomerSerializer(serializers.ModelSerializer):
 	# Store raw Base64 string (or empty) directly in DB
 	company_logo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+	full_name = serializers.SerializerMethodField()
 
 	class Meta:
 		model = Customer
 		fields = [
-			'id', 'first_name', 'last_name', 'company_name', 'company_logo',
+			'id', 'first_name', 'last_name', 'full_name', 'company_name', 'company_logo',
 			'mobile_phone', 'email', 'address', 'abn_no', 'position',
 			'type', 'event', 'is_deleted', 'created_at', 'updated_at'
 		]
 		read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
+	def get_full_name(self, obj):
+		"""Return full name combining first_name and last_name"""
+		return f"{obj.first_name} {obj.last_name}".strip()
+
 
 class CustomerCreateSerializer(serializers.ModelSerializer):
 	# Accept raw Base64 string (or empty) without decoding
 	company_logo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+	full_name = serializers.SerializerMethodField()
 
 	class Meta:
 		model = Customer
 		fields = [
-			'first_name', 'last_name', 'company_name', 'company_logo',
+			'first_name', 'last_name', 'full_name', 'company_name', 'company_logo',
 			'mobile_phone', 'email', 'address', 'abn_no', 'position',
 			'password', 'type', 'event', 'is_deleted'
 		]
-		read_only_fields = ['is_deleted']
+		read_only_fields = ['is_deleted', 'full_name']
 		extra_kwargs = {
 			'password': {'write_only': True, 'required': True},
 			'email': {'required': True},
@@ -90,6 +96,10 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
 			'last_name': {'required': True},
 			'company_name': {'required': True},
 		}
+
+	def get_full_name(self, obj):
+		"""Return full name combining first_name and last_name"""
+		return f"{obj.first_name} {obj.last_name}".strip()
 
 	def validate(self, attrs):
 		# normalize and trim email and password

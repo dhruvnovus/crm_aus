@@ -7,6 +7,8 @@ from rest_framework import viewsets, status, filters
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import IntegrityError
+from django.db.models import F, Value, CharField
+from django.db.models.functions import Concat
 from .models import Customer
 from .serializers import CustomerSerializer, CustomerCreateSerializer
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -63,7 +65,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
 	filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 	filterset_fields = ['type', 'event']
 	search_fields = ['first_name', 'last_name', 'company_name', 'email']
-	ordering_fields = ['created_at', 'updated_at', 'first_name', 'last_name', 'company_name', 'email']
+	ordering_fields = ['created_at', 'updated_at', 'first_name', 'last_name', 'full_name', 'company_name', 'email']
 	ordering = ['-created_at']
 	permission_classes = [IsAuthenticated]
 
@@ -86,7 +88,16 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 	def get_queryset(self):
 		# Exclude soft-deleted records by default
-		return Customer.objects.filter(is_deleted=False).order_by('-created_at')
+		# Annotate full_name for ordering support
+		queryset = Customer.objects.filter(is_deleted=False).annotate(
+			full_name=Concat(
+				F('first_name'),
+				Value(' '),
+				F('last_name'),
+				output_field=CharField()
+			)
+		)
+		return queryset
 
 	def list(self, request, *args, **kwargs):
 		queryset = self.filter_queryset(self.get_queryset())

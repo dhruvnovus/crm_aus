@@ -13,7 +13,7 @@ class LeadListSerializer(serializers.ModelSerializer):
     """
     Serializer for Lead list view (minimal fields for performance)
     """
-    # full_name = serializers.ReadOnlyField()
+    full_name = serializers.ReadOnlyField()
     status_display = serializers.ReadOnlyField()
     # title_display = serializers.CharField(source='get_title_display', read_only=True)
     lead_type_display = serializers.CharField(source='get_lead_type_display', read_only=True)
@@ -32,7 +32,7 @@ class LeadListSerializer(serializers.ModelSerializer):
             'status_display', 'intensity', 'intensity_display', 'opportunity_price',
             'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry',
             'assigned_sales_staff', 'customer', 'lead_name', 'lead_pipeline', 'lead_stage',
-            'date_received', 'created_at', 'updated_at', 'is_deleted'
+            'full_name', 'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
@@ -42,7 +42,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     """
     Serializer for Lead detail view (all fields)
     """
-    # full_name = serializers.ReadOnlyField()
+    full_name = serializers.ReadOnlyField()
     # display_name = serializers.ReadOnlyField()
     # status_display = serializers.ReadOnlyField()
     # title_display = serializers.CharField(source='get_title_display', read_only=True)
@@ -56,7 +56,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             'id', 'custom_email_addresses',
-            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'date_received', 'created_at', 'updated_at', 'is_deleted'
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'full_name', 'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
