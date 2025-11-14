@@ -158,6 +158,8 @@ class RoleViewSet(viewsets.ModelViewSet):
     def configure_permissions(self, request):
         """
         Configure permissions for roles in bulk.
+        When permissions are updated for a role (e.g., super_admin or sales_staff),
+        all employees with that role will automatically get the updated permissions.
         Accepts a list of role permission configurations.
         """
         serializer = RolePermissionConfigSerializer(data=request.data, many=True)
@@ -172,6 +174,9 @@ class RoleViewSet(viewsets.ModelViewSet):
             try:
                 role = Role.objects.get(id=role_id)
                 
+                # Get count of employees with this role (before updating permissions)
+                employees_count = Employee.objects.filter(role=role, is_active=True).count()
+                
                 # Remove existing permissions for this module
                 RolePermission.objects.filter(
                     role=role,
@@ -185,8 +190,11 @@ class RoleViewSet(viewsets.ModelViewSet):
                 
                 results.append({
                     'role_id': role_id,
+                    'role_name': role.name,
+                    'role_display_name': role.display_name,
                     'module': module,
-                    'status': 'success'
+                    'employees_affected': employees_count,
+                    'status': 'success',
                 })
             except (Role.DoesNotExist, Permission.DoesNotExist) as e:
                 results.append({
