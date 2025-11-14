@@ -41,42 +41,66 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['module', 'action']
     
     def list(self, request, *args, **kwargs):
-        """
-        Override list to return permissions grouped by module with boolean flags
-        """
         # Get all permissions
         permissions = self.get_queryset()
         
         # Get module display names
         module_display_map = dict(Permission.MODULE_CHOICES)
         
-        # Group permissions by module
-        permissions_by_module = {}
-        for perm in permissions:
-            module = perm.module
-            action = perm.action
+        # Get all unique modules from permissions
+        all_modules = set(perm.module for perm in permissions)
+        
+        # Get roles (super_admin and sales_staff)
+        roles = Role.objects.filter(name__in=['super_admin', 'sales_staff']).prefetch_related('role_permissions__permission')
+        
+        # Build response structure: role -> module -> permissions
+        response_data = {}
+        
+        for role in roles:
+            role_name = role.name
+            response_data[role_name] = {}
             
-            if module not in permissions_by_module:
-                permissions_by_module[module] = {
-                    'module': module_display_map.get(module, module.title()),
+            # Initialize all modules for this role with False permissions
+            for module in all_modules:
+                module_display = module_display_map.get(module, module.title())
+                response_data[role_name][module_display] = {
                     'can_create': False,
                     'can_read': False,
                     'can_update': False,
                     'can_delete': False
                 }
             
-            # Set the appropriate flag based on action
-            if action == 'create':
-                permissions_by_module[module]['can_create'] = True
-            elif action == 'read':
-                permissions_by_module[module]['can_read'] = True
-            elif action == 'update':
-                permissions_by_module[module]['can_update'] = True
-            elif action == 'delete':
-                permissions_by_module[module]['can_delete'] = True
+            # Set permissions for this role based on role_permissions
+            for role_perm in role.role_permissions.all():
+                perm = role_perm.permission
+                module = perm.module
+                module_display = module_display_map.get(module, module.title())
+                action = perm.action
+                
+                # Set the appropriate flag based on action
+                if action == 'create':
+                    response_data[role_name][module_display]['can_create'] = True
+                elif action == 'read':
+                    response_data[role_name][module_display]['can_read'] = True
+                elif action == 'update':
+                    response_data[role_name][module_display]['can_update'] = True
+                elif action == 'delete':
+                    response_data[role_name][module_display]['can_delete'] = True
         
-        # Return as list
-        return Response(list(permissions_by_module.values()), status=status.HTTP_200_OK)
+        # Ensure both roles exist even if they don't have permissions
+        for role_name in ['super_admin', 'sales_staff']:
+            if role_name not in response_data:
+                response_data[role_name] = {}
+                for module in all_modules:
+                    module_display = module_display_map.get(module, module.title())
+                    response_data[role_name][module_display] = {
+                        'can_create': False,
+                        'can_read': False,
+                        'can_update': False,
+                        'can_delete': False
+                    }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
 
 @extend_schema_view(
     list=extend_schema(
