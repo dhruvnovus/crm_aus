@@ -35,7 +35,7 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    permission_classes = [IsAuthenticated]
     pagination_class = None  # Disable pagination
     filterset_fields = ['module', 'action']
     ordering_fields = ['module', 'action']
@@ -200,7 +200,7 @@ class RoleViewSet(viewsets.ModelViewSet):
     
     @extend_schema(
         summary="Get employee permissions",
-        description="Get all permissions for an employee. If employee_id is provided, returns that employee's permissions (super admin only). Otherwise returns current user's permissions.",
+        description="Get all permissions for an employee. If employee_id is provided, returns that employee's permissions (any authenticated user can view any employee's permissions). Otherwise returns current user's permissions.",
         tags=["Roles & Permissions"],
         parameters=[
             OpenApiParameter(
@@ -208,45 +208,22 @@ class RoleViewSet(viewsets.ModelViewSet):
                 type=OpenApiTypes.INT,
                 location=OpenApiParameter.QUERY,
                 required=False,
-                description='Employee ID to get permissions for (super admin only). If not provided, returns current user\'s permissions.'
+                description='Employee ID to get permissions for. If not provided, returns current user\'s permissions.'
             ),
         ],
         responses={200: PermissionSerializer(many=True)},
     )
-    @action(detail=False, methods=['get'], url_path='my-permissions')
+    @action(detail=False, methods=['get'], url_path='my-permissions', permission_classes=[IsAuthenticated])
     def my_permissions(self, request):
         """
         Get all permissions for an employee.
-        - If employee_id is provided: Returns that employee's permissions (super admin only)
+        - If employee_id is provided: Returns that employee's permissions (any authenticated user can view any employee's permissions)
         - If employee_id is not provided: Returns current authenticated user's permissions
         """
         # Check if employee_id is provided in query params
         employee_id = request.query_params.get('employee_id')
         
         if employee_id:
-            # Get employee by ID - only super admins can query other employees
-            user_email = getattr(request.user, 'email', None) or getattr(request.user, 'username', None)
-            if not user_email:
-                return Response(
-                    {'detail': 'User email not found.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            current_employee = Employee.objects.filter(email=user_email, is_active=True).first()
-            if not current_employee:
-                return Response(
-                    {'detail': 'Current employee not found.'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            # Only super admins can query other employees' permissions
-            if current_employee.account_type != 'super_admin':
-                return Response(
-                    {'detail': 'Only super admins can view other employees\' permissions.'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            # Get the requested employee
             try:
                 employee = Employee.objects.get(id=employee_id, is_active=True)
             except Employee.DoesNotExist:

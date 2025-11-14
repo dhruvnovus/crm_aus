@@ -271,7 +271,16 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         # Remove password from validated_data - handle separately
         password = validated_data.pop('password', None)
         
-        # Update employee fields (profile_image will be handled automatically by ImageField)
+        # Handle profile_image explicitly
+        profile_image = validated_data.pop('profile_image', serializers.empty)
+        if profile_image is not serializers.empty:
+            # If profile_image is None or empty string, clear it
+            if profile_image is None or (isinstance(profile_image, str) and not profile_image.strip()):
+                instance.profile_image = None
+            else:
+                instance.profile_image = profile_image
+        
+        # Update employee fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
