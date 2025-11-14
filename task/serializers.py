@@ -341,7 +341,7 @@ class TaskHistorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskHistory
-        fields = ['id', 'action', 'changed_by', 'changed_by_name', 'changes', 'note', 'timestamp']
+        fields = ['id', 'action', 'changed_by_name', 'changes', 'note', 'timestamp']
         read_only_fields = ['timestamp', 'changed_by_name']
 
     def get_changed_by_name(self, obj):

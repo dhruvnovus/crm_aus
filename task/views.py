@@ -9,7 +9,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import transaction, IntegrityError
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
-from .models import Task, TaskHistory, TaskAttachment
+from .models import Task, TaskHistory, TaskAttachment, Subtask
 from employee.models import Employee
 from .serializers import TaskSerializer, TaskHistorySerializer, TaskAttachmentSerializer
 
@@ -75,8 +75,18 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def _actor(self):
         user = getattr(self.request, 'user', None)
-        if user and hasattr(user, 'id'):
-            # Try to resolve to Employee instance; return None if not found
+        if not user:
+            return None
+
+        # Primary resolution path: email/username
+        user_email = getattr(user, 'email', None) or getattr(user, 'username', None)
+        if user_email:
+            employee = Employee.objects.filter(email=user_email, is_active=True).first()
+            if employee:
+                return employee
+
+        # Fallback: direct id match (for backward compatibility)
+        if hasattr(user, 'id'):
             return Employee.objects.filter(id=user.id).first()
         return None
 
@@ -179,6 +189,31 @@ class TaskViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(task).data)
 
     def perform_destroy(self, instance):
+        # Store task title before deletion for subtask history
+        task_title = instance.title
+        
+        # If this task is a subtask of other tasks, create history in parent tasks
+        parent_tasks = Task.objects.filter(subtasks__child_task=instance, is_deleted=False).distinct()
+        for parent_task in parent_tasks:
+            # Find the subtask relationship
+            subtask = parent_task.subtasks.filter(child_task=instance).first()
+            if subtask:
+                # Create history in parent task showing subtask was deleted
+                TaskHistory.objects.create(
+                    task=parent_task,
+                    action='subtask_delete',
+                    changed_by=self._actor(),
+                    changes={
+                        'subtasks': {
+                            'added': [],
+                            'removed': [{'name': task_title}]
+                        }
+                    }
+                )
+                # Delete the subtask relationship
+                subtask.delete()
+        
+        # Mark task as deleted
         instance.is_deleted = True
         instance.save(update_fields=['is_deleted', 'updated_at'])
         TaskHistory.objects.create(task=instance, action='delete', changed_by=self._actor())
@@ -197,12 +232,22 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         old = self.get_object()
+        # Track all editable fields
         prev_values = {
             'assigned_to': old.assigned_to_id,
             'status': old.status,
             'priority': old.priority,
             'title': old.title,
+            'description': old.description,
+            'due_date': old.due_date,
+            'due_time': old.due_time,
         }
+        
+        # Track subtasks, reminders, and attachments before update
+        prev_subtasks = sorted(list(old.subtasks.values_list('child_task_id', flat=True)))
+        prev_reminders = sorted([(r.remind_at.isoformat() if r.remind_at else None) for r in old.reminders.all()])
+        prev_attachments = sorted([a.filename for a in old.attachments.all()])
+        
         try:
             with transaction.atomic():
                 # Get files from request.FILES if any
@@ -213,27 +258,118 @@ class TaskViewSet(viewsets.ModelViewSet):
                 task = serializer.save()
         except (IntegrityError, ValueError) as exc:
             raise ValidationError({'detail': str(exc)})
+        
+        # Refresh to get updated relationships
+        task.refresh_from_db()
+        
+        # Track all changes
         changes = {}
+        
+        # Track basic fields
         if prev_values['assigned_to'] != task.assigned_to_id:
-            changes['assigned_to'] = {'from': prev_values['assigned_to'], 'to': task.assigned_to_id}
-            action = 'assign'
-            
-            # Create notification if task is assigned to a new user
-            if task.assigned_to:
-                from notifications.signals import create_task_assignment_notification
-                create_task_assignment_notification(task, is_new=False)
+            from_employee = None
+            if prev_values['assigned_to']:
+                from_employee = Employee.objects.filter(id=prev_values['assigned_to']).first()
+            to_employee = task.assigned_to
+            changes['assigned_to'] = {
+                'from': {
+                    'name': from_employee.full_name if from_employee else None
+                },
+                'to': {
+                    'name': to_employee.full_name if to_employee else None
+                }
+            }
         if prev_values['status'] != task.status:
             changes['status'] = {'from': prev_values['status'], 'to': task.status}
         if prev_values['priority'] != task.priority:
             changes['priority'] = {'from': prev_values['priority'], 'to': task.priority}
         if prev_values['title'] != task.title:
             changes['title'] = {'from': prev_values['title'], 'to': task.title}
-        TaskHistory.objects.create(
-            task=task,
-            action='assign' if 'assigned_to' in changes and len(changes) == 1 else ('status_change' if 'status' in changes and len(changes) == 1 else 'update'),
-            changed_by=self._actor(),
-            changes=changes,
-        )
+        if prev_values['description'] != task.description:
+            changes['description'] = {'from': prev_values['description'], 'to': task.description}
+        
+        # Track due_date and due_time
+        if prev_values['due_date'] != task.due_date:
+            changes['due_date'] = {'from': prev_values['due_date'].isoformat() if prev_values['due_date'] else None, 'to': task.due_date.isoformat() if task.due_date else None}
+        if prev_values['due_time'] != task.due_time:
+            changes['due_time'] = {'from': prev_values['due_time'].isoformat() if prev_values['due_time'] else None, 'to': task.due_time.isoformat() if task.due_time else None}
+        
+        # Track subtasks changes
+        new_subtasks = sorted(list(task.subtasks.values_list('child_task_id', flat=True)))
+        if prev_subtasks != new_subtasks:
+            # Find added and removed subtasks
+            added_ids = [task_id for task_id in new_subtasks if task_id not in prev_subtasks]
+            removed_ids = [task_id for task_id in prev_subtasks if task_id not in new_subtasks]
+
+            added = []
+            removed = []
+            if added_ids:
+                added_tasks = Task.objects.filter(id__in=added_ids).values('id', 'title')
+                added = [{'name': t['title']} for t in added_tasks]
+            if removed_ids:
+                removed_tasks = Task.objects.filter(id__in=removed_ids).values('id', 'title')
+                removed = [{'name': t['title']} for t in removed_tasks]
+
+            if added or removed:
+                changes['subtasks'] = {
+                    'added': added,
+                    'removed': removed
+                }
+        
+        # Track reminders changes
+        new_reminders = sorted([(r.remind_at.isoformat() if r.remind_at else None) for r in task.reminders.all()])
+        if prev_reminders != new_reminders:
+            changes['reminders'] = {
+                'from': prev_reminders,
+                'to': new_reminders
+            }
+        
+        # Track attachments changes (new files added during update)
+        new_attachments = sorted([a.filename for a in task.attachments.all()])
+        if prev_attachments != new_attachments:
+            # Find added and removed attachments
+            added = [f for f in new_attachments if f not in prev_attachments]
+            removed = [f for f in prev_attachments if f not in new_attachments]
+            if added or removed:
+                changes['attachments'] = {
+                    'added': added,
+                    'removed': removed
+                }
+        
+        # Create notification if task is assigned to a new user
+        if 'assigned_to' in changes and task.assigned_to:
+            from notifications.signals import create_task_assignment_notification
+            create_task_assignment_notification(task, is_new=False)
+        
+        # Determine action type based on which field(s) changed
+        # Priority: single field changes get specific action, multiple changes = 'update'
+        if len(changes) == 1:
+            field_name = list(changes.keys())[0]
+            # Map field names to action names
+            action_map = {
+                'assigned_to': 'assign',
+                'status': 'status_change',
+                'priority': 'priority_change',
+                'title': 'title_change',
+                'description': 'description_change',
+                'due_date': 'due_date_change',
+                'due_time': 'due_time_change',
+                'subtasks': 'subtask_change',
+                'reminders': 'reminder_change',
+                'attachments': 'attachment_change',
+            }
+            action = action_map.get(field_name, 'update')
+        else:
+            action = 'update'
+        
+        # Only create history if there are changes
+        if changes:
+            TaskHistory.objects.create(
+                task=task,
+                action=action,
+                changed_by=self._actor(),
+                changes=changes,
+            )
 
     @extend_schema(
         summary="Get or add task history",
@@ -243,7 +379,12 @@ class TaskViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['get', 'post'])
     def history(self, request, pk=None):
-        task = self.get_object()
+        # Allow accessing history even for deleted tasks
+        try:
+            task = Task.objects.get(pk=pk)  # Get task without is_deleted filter
+        except Task.DoesNotExist:
+            return Response({'detail': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+        
         if request.method.lower() == 'post':
             note = request.data.get('note', '')
             entry = TaskHistory.objects.create(task=task, action='comment', note=note, changed_by=self._actor())
@@ -280,6 +421,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             raise ValidationError({'detail': 'No files provided'})
         
         attachments = []
+        added_filenames = []
         for uploaded_file in files:
             attachment = TaskAttachment.objects.create(
                 task=task,
@@ -287,13 +429,20 @@ class TaskViewSet(viewsets.ModelViewSet):
                 filename=uploaded_file.name
             )
             attachments.append(attachment)
-            # Create history entry
-            TaskHistory.objects.create(
-                task=task,
-                action='attachment_add',
-                changed_by=self._actor(),
-                changes={'filename': uploaded_file.name}
-            )
+            added_filenames.append(uploaded_file.name)
+        
+        # Create history entry with same format as update (added/removed)
+        TaskHistory.objects.create(
+            task=task,
+            action='attachment_add',
+            changed_by=self._actor(),
+            changes={
+                'attachments': {
+                    'added': added_filenames,
+                    'removed': []
+                }
+            }
+        )
         
         serializer = TaskAttachmentSerializer(attachments, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -362,11 +511,14 @@ class TaskViewSet(viewsets.ModelViewSet):
                 task=task,
                 action='attachment_remove',
                 changed_by=self._actor(),
-                changes={'filename': filename}
+                changes={
+                    'attachments': {
+                        'added': [],
+                        'removed': [filename]
+                    }
+                }
             )
             
             return Response({'detail': 'Attachment deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
         except TaskAttachment.DoesNotExist:
             raise Http404("Attachment not found")
-
-
