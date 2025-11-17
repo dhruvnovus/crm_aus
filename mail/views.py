@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
         tags=["Mails"],
         parameters=[
             OpenApiParameter(name='employee_id', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=True, description='Owner employee id'),
+            OpenApiParameter(name='status', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by status (draft, sent, scheduled, trash, starred)"),
+            OpenApiParameter(name='direction', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by direction (inbound/outbound)"),
+            OpenApiParameter(name='is_starred', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY, required=False, description="Filter starred mails explicitly"),
         ],
     ),
     create=extend_schema(summary="Compose mail", tags=["Mails"], request=MailSerializer),
@@ -50,22 +53,37 @@ class MailViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         employee_id = self.request.query_params.get('employee_id')
         status = self.request.query_params.get('status')
-        
+        direction = self.request.query_params.get('direction')
+        is_starred = self.request.query_params.get('is_starred')
+
         if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
             if not employee_id:
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
             qs = qs.filter(owner_id=employee_id)
-            
-            # Filter by deletion status based on status parameter
-            # If status is 'trash', show deleted mails (is_deleted=True)
-            # If status is not passed or is any other value, show only non-deleted mails (is_deleted=False)
+
+            # Filter by status (including virtual 'starred')
             if status == 'trash':
                 qs = qs.filter(is_deleted=True)
+            elif status == 'starred':
+                qs = qs.filter(is_deleted=False, is_starred=True)
+            elif status:
+                qs = qs.filter(status=status, is_deleted=False)
             else:
-                # status is None or any other value (draft, sent, scheduled, starred, etc.)
                 qs = qs.filter(is_deleted=False)
-        
+
+            if direction:
+                qs = qs.filter(direction=direction)
+
+            if is_starred not in (None, ''):
+                qs = qs.filter(is_starred=self._coerce_bool(is_starred))
+
         return qs
+
+    @staticmethod
+    def _coerce_bool(value):
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() in {'true', '1', 'yes', 'on'}
 
     def perform_destroy(self, instance):
         # When mail is deleted, set status to 'trash' and mark as deleted

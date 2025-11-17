@@ -17,7 +17,6 @@ class Mail(models.Model):
         ('draft', 'Draft'),
         ('sent', 'Sent'),
         ('scheduled', 'Scheduled'),
-        ('starred', 'Starred'),
         ('trash', 'Trash'),
     ]
 
@@ -32,7 +31,7 @@ class Mail(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
     scheduled_at = models.DateTimeField(blank=True, null=True)
     linked_task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name='emails')
-
+    is_starred = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
