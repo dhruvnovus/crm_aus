@@ -14,6 +14,7 @@ from notifications.signals import create_task_reminder_notification, create_task
 from task.serializers import TaskSerializer
 from employee.models import Employee
 from rest_framework.exceptions import ValidationError
+from django.db.models import Q
 logger = logging.getLogger(__name__)
 
 
@@ -42,11 +43,16 @@ logger = logging.getLogger(__name__)
     destroy=extend_schema(summary="Delete mail", tags=["Mails"]),
 )
 class MailViewSet(viewsets.ModelViewSet):
-    queryset = Mail.objects.select_related('linked_task', 'linked_task__assigned_to').all()
+    queryset = Mail.objects.select_related(
+        'linked_task',
+        'linked_task__assigned_to',
+        'sender',
+        'receiver'
+    ).all()
     serializer_class = MailSerializer
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    filterset_fields = ['direction', 'status', 'is_read']
+    filterset_fields = ['status', 'is_read']
     search_fields = ['subject', 'body', 'from_email']
     ordering_fields = ['created_at']
 
@@ -61,7 +67,7 @@ class MailViewSet(viewsets.ModelViewSet):
         if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
             if not employee_id:
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
-            qs = qs.filter(owner_id=employee_id)
+            qs = self._apply_participant_filter(qs, employee_id, direction)
 
             # Filter by status (including virtual 'starred')
             if status == 'trash':
@@ -73,7 +79,7 @@ class MailViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(is_deleted=False)
 
-            if direction:
+            if direction and direction not in {'inbound', 'outbound'}:
                 qs = qs.filter(direction=direction)
 
             if is_starred not in (None, ''):
@@ -89,6 +95,25 @@ class MailViewSet(viewsets.ModelViewSet):
         if isinstance(value, bool):
             return value
         return str(value).lower() in {'true', '1', 'yes', 'on'}
+
+    def _apply_participant_filter(self, queryset, employee_id, direction_param):
+        """
+        Use sender/receiver pairing to decide which mails to show.
+        - direction=inbound => receiver_id matches employee
+        - direction=outbound => sender_id matches employee
+        - otherwise => either sender or receiver matches
+        """
+        if direction_param == 'inbound':
+            return queryset.filter(receiver_id=employee_id)
+        if direction_param == 'outbound':
+            return queryset.filter(sender_id=employee_id)
+
+        qs = queryset.filter(Q(sender_id=employee_id) | Q(receiver_id=employee_id))
+
+        if direction_param not in (None, ''):
+            qs = qs.filter(direction=direction_param)
+
+        return qs
 
     def perform_destroy(self, instance):
         # When mail is deleted, set status to 'trash' and mark as deleted
@@ -232,8 +257,11 @@ class MailViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         # ensure mail belongs to the same employee
-        if str(mail.owner_id) != str(data['employee_id']):
-            return Response({'detail': 'employee_id does not match mail owner.'}, status=status.HTTP_400_BAD_REQUEST)
+        employee_id = str(data['employee_id'])
+        sender_match = mail.sender_id and str(mail.sender_id) == employee_id
+        receiver_match = mail.receiver_id and str(mail.receiver_id) == employee_id
+        if not (sender_match or receiver_match):
+            return Response({'detail': 'employee_id does not match mail participant.'}, status=status.HTTP_400_BAD_REQUEST)
 
         task = Task.objects.create(
             title=data['title'],

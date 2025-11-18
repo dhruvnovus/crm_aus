@@ -20,7 +20,8 @@ class Mail(models.Model):
         ('trash', 'Trash'),
     ]
 
-    owner = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mails')
+    sender = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mails')
+    receiver = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='received_mails', null=True, blank=True)
     from_email = models.EmailField(max_length=255, blank=True, null=True)
     to_emails = models.JSONField(default=list)
     cc_emails = models.JSONField(default=list, blank=True)
