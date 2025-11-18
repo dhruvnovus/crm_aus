@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
             OpenApiParameter(name='status', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by status (draft, sent, scheduled, trash, starred)"),
             OpenApiParameter(name='direction', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by direction (inbound/outbound)"),
             OpenApiParameter(name='is_starred', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY, required=False, description="Filter starred mails explicitly"),
+            OpenApiParameter(name='is_read', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY, required=False, description="Filter mails by read status"),
         ],
     ),
     create=extend_schema(summary="Compose mail", tags=["Mails"], request=MailSerializer),
@@ -45,7 +46,7 @@ class MailViewSet(viewsets.ModelViewSet):
     serializer_class = MailSerializer
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    filterset_fields = ['direction', 'status']
+    filterset_fields = ['direction', 'status', 'is_read']
     search_fields = ['subject', 'body', 'from_email']
     ordering_fields = ['created_at']
 
@@ -55,6 +56,7 @@ class MailViewSet(viewsets.ModelViewSet):
         status = self.request.query_params.get('status')
         direction = self.request.query_params.get('direction')
         is_starred = self.request.query_params.get('is_starred')
+        is_read = self.request.query_params.get('is_read')
 
         if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
             if not employee_id:
@@ -76,6 +78,9 @@ class MailViewSet(viewsets.ModelViewSet):
 
             if is_starred not in (None, ''):
                 qs = qs.filter(is_starred=self._coerce_bool(is_starred))
+
+            if is_read not in (None, ''):
+                qs = qs.filter(is_read=self._coerce_bool(is_read))
 
         return qs
 

@@ -27,7 +27,7 @@ class MailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'from_email', 'to_emails', 'cc_emails', 'bcc_emails',
             'subject', 'body', 'direction', 'status', 'is_starred', 'scheduled_at',
-            'attachments', 'files', 'created_at', 'updated_at', 'employee_id'
+            'attachments', 'files', 'created_at', 'updated_at', 'employee_id','is_read'
         ]
         read_only_fields = ['created_at', 'updated_at', 'attachments']
 
