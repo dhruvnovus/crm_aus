@@ -1,4 +1,5 @@
 from django.db.models.signals import post_save, pre_save, pre_delete
+from django.db.models.fields.files import FieldFile
 from django.db import transaction
 from django.dispatch import receiver
 from django.contrib.auth.models import AnonymousUser
@@ -18,6 +19,9 @@ def serialize_value(value):
     elif isinstance(value, date):
         return value.isoformat()
     # Handle model instances (like Role, ForeignKey relationships)
+    elif isinstance(value, FieldFile):
+        file_name = value.name if value and value.name else None
+        return file_name
     elif hasattr(value, 'pk'):
         # Return the primary key for model instances
         return value.pk
