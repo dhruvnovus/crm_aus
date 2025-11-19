@@ -47,8 +47,7 @@ class MailViewSet(viewsets.ModelViewSet):
         'linked_task',
         'linked_task__assigned_to',
         'sender',
-        'receiver'
-    ).all()
+    ).prefetch_related('receivers').all()
     serializer_class = MailSerializer
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -99,16 +98,16 @@ class MailViewSet(viewsets.ModelViewSet):
     def _apply_participant_filter(self, queryset, employee_id, direction_param):
         """
         Use sender/receiver pairing to decide which mails to show.
-        - direction=inbound => receiver_id matches employee
+        - direction=inbound => receivers include employee
         - direction=outbound => sender_id matches employee
         - otherwise => either sender or receiver matches
         """
         if direction_param == 'inbound':
-            return queryset.filter(receiver_id=employee_id)
+            return queryset.filter(receivers__id=employee_id)
         if direction_param == 'outbound':
             return queryset.filter(sender_id=employee_id)
 
-        qs = queryset.filter(Q(sender_id=employee_id) | Q(receiver_id=employee_id))
+        qs = queryset.filter(Q(sender_id=employee_id) | Q(receivers__id=employee_id)).distinct()
 
         if direction_param not in (None, ''):
             qs = qs.filter(direction=direction_param)
@@ -259,7 +258,7 @@ class MailViewSet(viewsets.ModelViewSet):
         # ensure mail belongs to the same employee
         employee_id = str(data['employee_id'])
         sender_match = mail.sender_id and str(mail.sender_id) == employee_id
-        receiver_match = mail.receiver_id and str(mail.receiver_id) == employee_id
+        receiver_match = mail.receivers.filter(id=employee_id).exists()
         if not (sender_match or receiver_match):
             return Response({'detail': 'employee_id does not match mail participant.'}, status=status.HTTP_400_BAD_REQUEST)
 

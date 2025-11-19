@@ -168,7 +168,7 @@ class MailSerializer(serializers.ModelSerializer):
                 employee_id = request.data.get('employee_id')
 
         if employee_id:
-            if instance.receiver_id and str(instance.receiver_id) == str(employee_id):
+            if instance.receivers.filter(id=employee_id).exists():
                 representation['direction'] = 'inbound'
             elif instance.sender_id and str(instance.sender_id) == str(employee_id):
                 representation['direction'] = 'outbound'
@@ -189,10 +189,10 @@ class MailSerializer(serializers.ModelSerializer):
         return self._employee_summary(getattr(obj, 'sender', None))
 
     def get_receivers(self, obj):
-        receiver = getattr(obj, 'receiver', None)
-        if not receiver:
+        receivers = getattr(obj, 'receivers', None)
+        if not receivers:
             return []
-        return [self._employee_summary(receiver)]
+        return [self._employee_summary(employee) for employee in receivers.all()]
 
     def _resolve_sender_id(self, validated_data):
         sender_id = validated_data.pop('sender_id', None)
@@ -218,10 +218,11 @@ class MailSerializer(serializers.ModelSerializer):
         sender_id = self._resolve_sender_id(validated_data)
         validated_data['sender_id'] = sender_id
         receivers = self._resolve_receivers(receiver_ids)
-        validated_data['receiver_id'] = receivers[0] if receivers else None
 
         self._ensure_from_email(validated_data)
         mail = Mail.objects.create(**validated_data)
+        if receivers:
+            mail.receivers.set(receivers)
         for f in files:
             MailAttachment.objects.create(mail=mail, file=f, filename=f.name)
         return mail
@@ -231,13 +232,14 @@ class MailSerializer(serializers.ModelSerializer):
         validated_data.pop('sender_id', None)
 
         receiver_ids = validated_data.pop('receiver_ids', None)
-        if receiver_ids is not None:
-            receivers = self._resolve_receivers(receiver_ids)
-            validated_data['receiver_id'] = receivers[0] if receivers else None
 
         self._ensure_from_email(validated_data)
 
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+        if receiver_ids is not None:
+            receivers = self._resolve_receivers(receiver_ids)
+            instance.receivers.set(receivers)
+        return instance
 
     def _ensure_from_email(self, validated_data):
         """
