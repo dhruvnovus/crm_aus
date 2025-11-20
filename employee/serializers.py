@@ -91,7 +91,8 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     status_display = serializers.ReadOnlyField()
     # account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
     staff_type_display = serializers.CharField(source='get_staff_type_display', read_only=True)
-    profile_image = serializers.ImageField(required=False, allow_null=True)
+    profile_image = serializers.ImageField(required=False, allow_null=True, read_only=True)
+    profile_image_url = serializers.SerializerMethodField()
     role = RoleBasicSerializer(read_only=True)
     
     class Meta:
@@ -100,10 +101,19 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'id', 'account_type', 'staff_type', 'staff_type_display', 
             'is_active', 'is_resigned', 'title', 'first_name', 'last_name', 'full_name',
             'email', 'position', 'gender', 'mobile_no', 'address', 'post_code',
-            'profile_image', 'hours_per_week', 'status_display', 'role',
+            'profile_image', 'profile_image_url', 'hours_per_week', 'status_display', 'role',
             'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
+    
+    def get_profile_image_url(self, obj):
+        """Return the absolute URL to access the profile image"""
+        if obj.profile_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_image.url)
+            return obj.profile_image.url
+        return None
 
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
@@ -118,7 +128,8 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     title_display = serializers.CharField(source='get_title_display', read_only=True)
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
     emergency_contacts = EmergencyContactSerializer(many=True, read_only=True)
-    profile_image = serializers.ImageField(required=False, allow_null=True)
+    profile_image = serializers.ImageField(required=False, allow_null=True, read_only=True)
+    profile_image_url = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
 
     class Meta:
@@ -128,13 +139,22 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'is_active', 'is_resigned', 'title', 'title_display', 'first_name', 'last_name',
             'full_name', 'display_name', 'email', 'password', 'position', 'gender', 'gender_display',
             'date_of_birth', 'mobile_no', 'landline_no', 'language_spoken', 'unit_number',
-            'address', 'post_code', 'profile_image', 'admin_notes', 'hours_per_week',
+            'address', 'post_code', 'profile_image', 'profile_image_url', 'admin_notes', 'hours_per_week',
             'status_display', 'emergency_contacts', 'role', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
         extra_kwargs = {
             'password': {'write_only': True}
         }
+    
+    def get_profile_image_url(self, obj):
+        """Return the absolute URL to access the profile image"""
+        if obj.profile_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_image.url)
+            return obj.profile_image.url
+        return None
     
     def get_role(self, obj):
         """Get role information if role is assigned"""
@@ -159,7 +179,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
     Serializer for Employee create and update operations
     """
     emergency_contacts = EmergencyContactSerializer(many=True, required=False)
-    profile_image = serializers.ImageField(required=False, allow_null=True)
+    profile_image = serializers.ImageField(required=False, allow_null=True, write_only=False)
     role_id = serializers.IntegerField(required=False, allow_null=True)
     
     class Meta:
