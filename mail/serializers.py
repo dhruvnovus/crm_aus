@@ -1,5 +1,7 @@
 import json
 from rest_framework import serializers
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 from .models import Mail, MailAttachment
 from task.models import Task
 from task.serializers import TaskSerializer, TaskReminderSerializer
@@ -8,14 +10,43 @@ from django.core.validators import EmailValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.conf import settings
 from employee.models import Employee
-
-
+from .models import MailParticipantStatus
 class MailAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = MailAttachment
         fields = ['id', 'filename', 'content_type', 'file_size', 'uploaded_at']
         read_only_fields = fields
 
+
+@extend_schema_field(OpenApiTypes.BOOL)
+class ParticipantStatusBooleanField(serializers.Field):
+    """
+    Dual-purpose boolean field:
+    - Uses serializer's getter (e.g., get_is_read) for representation
+    - Accepts boolean input for write operations
+    """
+    def __init__(self, getter_name, **kwargs):
+        self.getter_name = getter_name
+        super().__init__(**kwargs)
+
+    def get_attribute(self, instance):
+        # Return the whole instance so the getter can access participant data
+        return instance
+
+    def to_representation(self, instance):
+        getter = getattr(self.parent, self.getter_name)
+        return getter(instance)
+
+    def to_internal_value(self, data):
+        if isinstance(data, bool):
+            return data
+        if isinstance(data, str):
+            value = data.strip().lower()
+            if value in {'true', '1', 'yes', 'on'}:
+                return True
+            if value in {'false', '0', 'no', 'off'}:
+                return False
+        raise serializers.ValidationError('This field must be a boolean.')
 
 class MailSerializer(serializers.ModelSerializer):
     attachments = MailAttachmentSerializer(many=True, read_only=True)
@@ -29,6 +60,8 @@ class MailSerializer(serializers.ModelSerializer):
     )
     sender = serializers.SerializerMethodField(read_only=True)
     receivers = serializers.SerializerMethodField(read_only=True)
+    is_starred = ParticipantStatusBooleanField(getter_name='get_is_starred', required=False)
+    is_read = ParticipantStatusBooleanField(getter_name='get_is_read', required=False)
 
     class Meta:
         model = Mail
@@ -39,6 +72,25 @@ class MailSerializer(serializers.ModelSerializer):
             'sender_id', 'receiver_ids', 'sender', 'receivers', 'is_read'
         ]
         read_only_fields = ['created_at', 'updated_at', 'attachments', 'sender', 'receivers']
+
+    def _resolve_context_employee_id(self, include_sender_fallback=False):
+        request = self.context.get('request')
+        if not request:
+            return None
+
+        employee_id = None
+        if hasattr(request, 'query_params'):
+            employee_id = request.query_params.get('employee_id')
+
+        if not employee_id and hasattr(request, 'data'):
+            employee_id = request.data.get('employee_id')
+            if not employee_id and include_sender_fallback:
+                employee_id = request.data.get('sender_id')
+
+        if not employee_id and hasattr(request, 'user') and hasattr(request.user, 'id'):
+            employee_id = request.user.id
+
+        return employee_id
 
     def validate_to_emails(self, value):
         if not isinstance(value, list) or len(value) == 0:
@@ -160,12 +212,7 @@ class MailSerializer(serializers.ModelSerializer):
         if not from_email or from_email == '':
             representation['from_email'] = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
 
-        request = self.context.get('request')
-        employee_id = None
-        if request:
-            employee_id = request.query_params.get('employee_id')
-            if not employee_id and hasattr(request, 'data'):
-                employee_id = request.data.get('employee_id')
+        employee_id = self._resolve_context_employee_id(include_sender_fallback=True)
 
         if employee_id:
             if instance.receivers.filter(id=employee_id).exists():
@@ -194,6 +241,30 @@ class MailSerializer(serializers.ModelSerializer):
             return []
         return [self._employee_summary(employee) for employee in receivers.all()]
 
+    def get_is_starred(self, obj):
+        """Check if current employee has starred this mail"""
+        employee_id = self._resolve_context_employee_id(include_sender_fallback=True)
+        
+        if employee_id:
+            try:
+                status = obj.participant_statuses.filter(employee_id=int(employee_id)).first()
+                return status.is_starred if status else False
+            except (ValueError, TypeError):
+                pass
+        return False
+
+    def get_is_read(self, obj):
+        """Check if current employee has read this mail"""
+        employee_id = self._resolve_context_employee_id(include_sender_fallback=True)
+        
+        if employee_id:
+            try:
+                status = obj.participant_statuses.filter(employee_id=int(employee_id)).first()
+                return status.is_read if status else False
+            except (ValueError, TypeError):
+                pass
+        return False
+
     def _resolve_sender_id(self, validated_data):
         sender_id = validated_data.pop('sender_id', None)
         if not sender_id:
@@ -214,6 +285,8 @@ class MailSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         files = validated_data.pop('files', [])
+        validated_data.pop('is_read', None)
+        validated_data.pop('is_starred', None)
         receiver_ids = validated_data.pop('receiver_ids', None)
         sender_id = self._resolve_sender_id(validated_data)
         validated_data['sender_id'] = sender_id
@@ -221,8 +294,22 @@ class MailSerializer(serializers.ModelSerializer):
 
         self._ensure_from_email(validated_data)
         mail = Mail.objects.create(**validated_data)
+        MailParticipantStatus.objects.get_or_create(
+            mail=mail,
+            employee_id=sender_id,
+            defaults={'delete_status': 'sent', 'is_read': True, 'is_starred': False}
+        )
+        
+        # Create default participant status for each receiver
         if receivers:
             mail.receivers.set(receivers)
+            for receiver_id in receivers:
+                MailParticipantStatus.objects.get_or_create(
+                    mail=mail,
+                    employee_id=receiver_id,
+                    defaults={'delete_status': 'inbox', 'is_read': False, 'is_starred': False}
+                )
+        
         for f in files:
             MailAttachment.objects.create(mail=mail, file=f, filename=f.name)
         return mail
@@ -232,6 +319,43 @@ class MailSerializer(serializers.ModelSerializer):
         validated_data.pop('sender_id', None)
 
         receiver_ids = validated_data.pop('receiver_ids', None)
+        # Handle is_read and is_starred updates via MailParticipantStatus
+        is_read = validated_data.pop('is_read', None)
+        is_starred = validated_data.pop('is_starred', None)
+        
+        # Get employee_id from request context (user, query params, or body)
+        employee_id = self._resolve_context_employee_id(include_sender_fallback=False)
+        
+        # Update MailParticipantStatus if is_read or is_starred is provided
+        if employee_id and (is_read is not None or is_starred is not None):
+            try:
+                employee = Employee.objects.get(id=int(employee_id), is_deleted=False)
+                employee_id_int = employee.id
+                participant_status, created = MailParticipantStatus.objects.get_or_create(
+                    mail=instance,
+                    employee=employee,
+                    defaults={
+                        'delete_status': 'inbox' if instance.receivers.filter(id=employee_id_int).exists() else 'sent',
+                        'is_read': False,
+                        'is_starred': False
+                    }
+                )
+                
+                update_fields = []
+                if is_read is not None:
+                    participant_status.is_read = is_read
+                    update_fields.append('is_read')
+                if is_starred is not None:
+                    participant_status.is_starred = is_starred
+                    update_fields.append('is_starred')
+                
+                if update_fields:
+                    update_fields.append('updated_at')
+                    participant_status.save(update_fields=update_fields)
+            except (ValueError, TypeError, Employee.DoesNotExist):
+                # If employee_id is invalid or employee not found, silently ignore
+                # (don't break the update for other fields)
+                pass
 
         self._ensure_from_email(validated_data)
 

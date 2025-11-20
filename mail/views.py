@@ -6,7 +6,8 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from django.conf import settings
-from .models import Mail, MailAttachment
+from django.utils import timezone
+from .models import Mail, MailAttachment, MailParticipantStatus
 from .serializers import MailSerializer, CreateTaskFromMailSerializer
 from .email_service import send_email_via_smtp2go
 from task.models import Task, TaskAttachment, TaskHistory, TaskReminder
@@ -24,7 +25,13 @@ logger = logging.getLogger(__name__)
         tags=["Mails"],
         parameters=[
             OpenApiParameter(name='employee_id', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=True, description='Owner employee id'),
-            OpenApiParameter(name='status', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by status (draft, sent, scheduled, trash, starred)"),
+            OpenApiParameter(
+                name='status',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filter by mail status (draft, sent, scheduled). Use 'trash' for trash view or 'starred' to list starred mails."
+            ),
             OpenApiParameter(name='direction', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description="Filter by direction (inbound/outbound)"),
             OpenApiParameter(name='is_starred', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY, required=False, description="Filter starred mails explicitly"),
             OpenApiParameter(name='is_read', type=OpenApiTypes.BOOL, location=OpenApiParameter.QUERY, required=False, description="Filter mails by read status"),
@@ -38,9 +45,42 @@ logger = logging.getLogger(__name__)
             OpenApiParameter(name='employee_id', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=True, description='Owner employee id'),
         ],
     ),
-    update=extend_schema(summary="Update mail (full)", tags=["Mails"], request=MailSerializer),
-    partial_update=extend_schema(summary="Update mail (partial)", tags=["Mails"], request=MailSerializer),
-    destroy=extend_schema(summary="Delete mail", tags=["Mails"]),
+    update=extend_schema(
+        summary="Update mail (full)",
+        tags=["Mails"],
+        request=MailSerializer,
+        parameters=[
+            OpenApiParameter(
+                name='employee_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description='update'
+            ),
+        ],
+    ),
+    partial_update=extend_schema(
+        summary="Update mail (partial)",
+        tags=["Mails"],
+        request=MailSerializer,
+        parameters=[
+            OpenApiParameter(
+                name='employee_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description='update'
+            ),
+        ],
+    ),
+    destroy=extend_schema(
+        summary="Delete mail",
+        description="Delete mail for the current participant. First delete moves to trash, second delete removes.",
+        tags=["Mails"],
+        parameters=[
+            OpenApiParameter(name='employee_id', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=True, description='Employee ID of the participant deleting the mail'),
+        ],
+    ),
 )
 class MailViewSet(viewsets.ModelViewSet):
     queryset = Mail.objects.select_related(
@@ -51,7 +91,7 @@ class MailViewSet(viewsets.ModelViewSet):
     serializer_class = MailSerializer
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    filterset_fields = ['status', 'is_read']
+    filterset_fields = []
     search_fields = ['subject', 'body', 'from_email']
     ordering_fields = ['created_at']
 
@@ -68,24 +108,36 @@ class MailViewSet(viewsets.ModelViewSet):
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
             qs = self._apply_participant_filter(qs, employee_id, direction)
 
-            # Filter by status (including virtual 'starred')
-            if status == 'trash':
-                qs = qs.filter(is_deleted=True)
-            elif status == 'starred':
-                qs = qs.filter(is_deleted=False, is_starred=True)
-            elif status:
-                qs = qs.filter(status=status, is_deleted=False)
-            else:
-                qs = qs.filter(is_deleted=False)
+            # Filter by status flag supplied by the client
+            if status == 'starred':
+                # Filter mails starred by the current employee
+                qs = qs.filter(participant_statuses__employee_id=employee_id, participant_statuses__is_starred=True).distinct()
+            elif status not in (None, '', 'trash'):
+                qs = qs.filter(status=status)
 
             if direction and direction not in {'inbound', 'outbound'}:
                 qs = qs.filter(direction=direction)
 
             if is_starred not in (None, ''):
-                qs = qs.filter(is_starred=self._coerce_bool(is_starred))
+                # Filter by whether current employee has starred
+                if self._coerce_bool(is_starred):
+                    qs = qs.filter(participant_statuses__employee_id=employee_id, participant_statuses__is_starred=True).distinct()
+                else:
+                    qs = qs.exclude(participant_statuses__employee_id=employee_id, participant_statuses__is_starred=True)
 
             if is_read not in (None, ''):
-                qs = qs.filter(is_read=self._coerce_bool(is_read))
+                # Filter by whether current employee has read
+                if self._coerce_bool(is_read):
+                    qs = qs.filter(participant_statuses__employee_id=employee_id, participant_statuses__is_read=True).distinct()
+                else:
+                    qs = qs.exclude(participant_statuses__employee_id=employee_id, participant_statuses__is_read=True)
+
+            qs = self._apply_visibility_filters(
+                qs,
+                employee_id,
+                direction_param=direction,
+                viewing_trash=(status == 'trash')
+            )
 
         return qs
 
@@ -114,11 +166,13 @@ class MailViewSet(viewsets.ModelViewSet):
 
         return qs
 
-    def perform_destroy(self, instance):
-        # When mail is deleted, set status to 'trash' and mark as deleted
-        instance.status = 'trash'
-        instance.is_deleted = True
-        instance.save(update_fields=['status', 'is_deleted', 'updated_at'])
+    def destroy(self, request, *args, **kwargs):
+        employee_id = request.query_params.get('employee_id') or request.data.get('employee_id')
+        if not employee_id:
+            raise ValidationError({'employee_id': 'This query parameter is required.'})
+        instance = self.get_object()
+        self._soft_delete(instance, employee_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _actor(self):
         user = getattr(self.request, 'user', None)
@@ -297,4 +351,187 @@ class MailViewSet(viewsets.ModelViewSet):
         task = Task.objects.prefetch_related('reminders').get(id=task.id)
         return Response(TaskSerializer(task, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
+    def _apply_visibility_filters(self, queryset, employee_id, direction_param=None, viewing_trash=False):
+        """
+        Hide mails that a participant has deleted from their views.
+        Uses MailParticipantStatus.delete_status field:
+        - 'sent'/'inbox': visible in normal view
+        - 'trash': visible only in trash view
+        - 'deleted': permanently hidden
+        """
+        try:
+            employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            raise ValidationError({'employee_id': 'Invalid employee_id'})
 
+        if viewing_trash:
+            qs = queryset.filter(
+                participant_statuses__employee_id=employee_id,
+                participant_statuses__delete_status='trash'
+            ).distinct()
+        else:
+            deleted_ids = queryset.filter(
+                participant_statuses__employee_id=employee_id,
+                participant_statuses__delete_status__in=['deleted', 'trash']
+            ).values_list('id', flat=True)
+            qs = queryset.exclude(id__in=list(deleted_ids))
+
+        if direction_param == 'inbound':
+            return qs.filter(receivers__id=employee_id).distinct()
+        if direction_param == 'outbound':
+            return qs.filter(sender_id=employee_id).distinct()
+
+        return qs
+
+    def _soft_delete(self, mail_instance, employee_id):
+        """
+        Toggle delete status for sender/receiver instead of removing the record globally.
+        Uses MailParticipantStatus.delete_status field to track per-participant delete status.
+        Flow:
+        1. First delete: 'sent'/'inbox' -> 'trash' (mail moves to trash)
+        2. Delete from trash: 'trash' -> 'deleted' (mail permanently hidden for that participant)
+        """
+        try:
+            employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            raise ValidationError({'employee_id': 'Invalid employee_id'})
+
+        try:
+            employee = Employee.objects.get(id=employee_id, is_deleted=False)
+        except Employee.DoesNotExist:
+            raise ValidationError({'employee_id': 'Employee not found.'})
+
+        # Check if employee is sender or receiver
+        is_sender = mail_instance.sender_id == employee_id
+        is_receiver = mail_instance.receivers.filter(id=employee_id).exists()
+
+        if not (is_sender or is_receiver):
+            raise ValidationError({'employee_id': 'Employee is not a participant in this mail.'})
+
+        # Get or create participant status with default based on role
+        default_status = 'sent' if is_sender else 'inbox'
+        participant_status, created = MailParticipantStatus.objects.get_or_create(
+            mail=mail_instance,
+            employee=employee,
+            defaults={'delete_status': default_status, 'is_read': False, 'is_starred': False}
+        )
+
+        current_status = participant_status.delete_status
+
+        # Delete flow logic
+        if current_status in ('sent', 'inbox'):
+            # First delete: move to trash
+            participant_status.delete_status = 'trash'
+            participant_status.save(update_fields=['delete_status', 'updated_at'])
+        elif current_status == 'trash':
+            # Delete from trash: permanently hide
+            participant_status.delete_status = 'deleted'
+            participant_status.save(update_fields=['delete_status', 'updated_at'])
+
+    # @extend_schema(summary="Mark mail as read", tags=["Mails"])
+    # @action(detail=True, methods=['post'])
+    # def mark_read(self, request, pk=None):
+    #     """Mark mail as read for the current employee"""
+    #     mail = self.get_object()
+    #     employee_id = request.query_params.get('employee_id') or request.data.get('employee_id')
+    #     if not employee_id:
+    #         return Response({'error': 'employee_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     try:
+    #         employee = Employee.objects.get(id=employee_id, is_deleted=False)
+    #     except Employee.DoesNotExist:
+    #         return Response({'error': 'Employee not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+    #     # Check if employee is sender or receiver
+    #     if mail.sender_id != int(employee_id) and not mail.receivers.filter(id=employee_id).exists():
+    #         return Response({'error': 'Employee is not a participant in this mail'}, status=status.HTTP_403_FORBIDDEN)
+        
+    #     # Get or create participant status
+    #     status_obj, created = MailParticipantStatus.objects.get_or_create(
+    #         mail=mail,
+    #         employee=employee,
+    #         defaults={'is_read': True, 'read_at': timezone.now()}
+    #     )
+    #     if not created:
+    #         status_obj.is_read = True
+    #         status_obj.read_at = timezone.now()
+    #         status_obj.save(update_fields=['is_read', 'read_at', 'updated_at'])
+        
+    #     serializer = self.get_serializer(mail, context={'request': request})
+    #     return Response(serializer.data)
+
+    # @extend_schema(summary="Mark mail as unread", tags=["Mails"])
+    # @action(detail=True, methods=['post'])
+    # def mark_unread(self, request, pk=None):
+    #     """Mark mail as unread for the current employee"""
+    #     mail = self.get_object()
+    #     employee_id = request.query_params.get('employee_id') or request.data.get('employee_id')
+    #     if not employee_id:
+    #         return Response({'error': 'employee_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     try:
+    #         employee = Employee.objects.get(id=employee_id, is_deleted=False)
+    #     except Employee.DoesNotExist:
+    #         return Response({'error': 'Employee not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+    #     MailParticipantStatus.objects.filter(mail=mail, employee=employee).update(
+    #         is_read=False,
+    #         read_at=None,
+    #         updated_at=timezone.now()
+    #     )
+    #     serializer = self.get_serializer(mail, context={'request': request})
+    #     return Response(serializer.data)
+
+    # @extend_schema(summary="Star mail", tags=["Mails"])
+    # @action(detail=True, methods=['post'])
+    # def star(self, request, pk=None):
+    #     """Star mail for the current employee"""
+    #     mail = self.get_object()
+    #     employee_id = request.query_params.get('employee_id') or request.data.get('employee_id')
+    #     if not employee_id:
+    #         return Response({'error': 'employee_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     try:
+    #         employee = Employee.objects.get(id=employee_id, is_deleted=False)
+    #     except Employee.DoesNotExist:
+    #         return Response({'error': 'Employee not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+    #     # Check if employee is sender or receiver
+    #     if mail.sender_id != int(employee_id) and not mail.receivers.filter(id=employee_id).exists():
+    #         return Response({'error': 'Employee is not a participant in this mail'}, status=status.HTTP_403_FORBIDDEN)
+        
+    #     # Get or create participant status
+    #     status_obj, created = MailParticipantStatus.objects.get_or_create(
+    #         mail=mail,
+    #         employee=employee,
+    #         defaults={'is_starred': True, 'starred_at': timezone.now()}
+    #     )
+    #     if not created:
+    #         status_obj.is_starred = True
+    #         status_obj.starred_at = timezone.now()
+    #         status_obj.save(update_fields=['is_starred', 'starred_at', 'updated_at'])
+        
+    #     serializer = self.get_serializer(mail, context={'request': request})
+    #     return Response(serializer.data)
+
+    # @extend_schema(summary="Unstar mail", tags=["Mails"])
+    # @action(detail=True, methods=['post'])
+    # def unstar(self, request, pk=None):
+    #     """Unstar mail for the current employee"""
+    #     mail = self.get_object()
+    #     employee_id = request.query_params.get('employee_id') or request.data.get('employee_id')
+    #     if not employee_id:
+    #         return Response({'error': 'employee_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     try:
+    #         employee = Employee.objects.get(id=employee_id, is_deleted=False)
+    #     except Employee.DoesNotExist:
+    #         return Response({'error': 'Employee not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+    #     MailParticipantStatus.objects.filter(mail=mail, employee=employee).update(
+    #         is_starred=False,
+    #         starred_at=None,
+    #         updated_at=timezone.now()
+    #     )
+    #     serializer = self.get_serializer(mail, context={'request': request})
+    #     return Response(serializer.data)

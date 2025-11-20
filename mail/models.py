@@ -17,7 +17,6 @@ class Mail(models.Model):
         ('draft', 'Draft'),
         ('sent', 'Sent'),
         ('scheduled', 'Scheduled'),
-        ('trash', 'Trash'),
     ]
 
     sender = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mails')
@@ -32,11 +31,8 @@ class Mail(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
     scheduled_at = models.DateTimeField(blank=True, null=True)
     linked_task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name='emails')
-    is_starred = models.BooleanField(default=False)
-    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_read=models.BooleanField(default=False)
 
     class Meta:
         db_table = 'mail_messages'
@@ -45,6 +41,43 @@ class Mail(models.Model):
     def __str__(self):
         return f"{self.subject}"
 
+
+class MailParticipantStatus(models.Model):
+    """
+    Track per-participant status for each mail (read/starred/delete status)
+    Each employee who is a sender or receiver can have their own status
+    - is_read: Whether the participant has read the mail
+    - is_starred: Whether the participant has starred the mail
+    - delete_status: Delete status ('sent'/'inbox' -> 'trash' -> 'deleted')
+    """
+    DELETE_CHOICES = [
+        ('sent', 'Sent'),
+        ('inbox', 'Inbox'),
+        ('trash', 'Trash'),
+        ('deleted', 'Deleted (softdelete)'),
+    ]
+
+    mail = models.ForeignKey(Mail, on_delete=models.CASCADE, related_name='participant_statuses')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mail_statuses')
+    is_read = models.BooleanField(default=False)
+    is_starred = models.BooleanField(default=False)
+    delete_status = models.CharField(max_length=10, choices=DELETE_CHOICES, default='inbox')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'mail_participant_statuses'
+        unique_together = [['mail', 'employee']]
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['mail', 'employee']),
+            models.Index(fields=['employee', 'is_read']),
+            models.Index(fields=['employee', 'is_starred']),
+            models.Index(fields=['employee', 'delete_status']),
+        ]
+
+    def __str__(self):
+        return f"Mail {self.mail_id} - Employee {self.employee_id} (delete_status={self.delete_status}, read={self.is_read}, starred={self.is_starred})"
 
 class MailAttachment(models.Model):
     mail = models.ForeignKey(Mail, on_delete=models.CASCADE, related_name='attachments')
