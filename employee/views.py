@@ -479,8 +479,11 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             return Response({"status": False, "error": self._first_error(serializer.errors)}, status=status.HTTP_400_BAD_REQUEST)
         try:
             employee = serializer.save()
-            # Return detailed employee data
-            detail_serializer = EmployeeDetailSerializer(employee)
+            # Return detailed employee data with request context for absolute media URLs
+            detail_serializer = EmployeeDetailSerializer(
+                employee,
+                context=self.get_serializer_context()
+            )
             return Response({"status": True, "message": "Employee updated successfully", "data": detail_serializer.data})
         except IntegrityError as e:
             if 'email' in str(e).lower() or 'unique' in str(e).lower():
