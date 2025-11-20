@@ -106,7 +106,13 @@ class MailViewSet(viewsets.ModelViewSet):
         if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
             if not employee_id:
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
+            try:
+                employee_id_int = int(employee_id)
+            except (TypeError, ValueError):
+                raise ValidationError({'employee_id': 'Invalid employee_id'})
+
             qs = self._apply_participant_filter(qs, employee_id, direction)
+            qs = qs.exclude(~Q(sender_id=employee_id_int) & Q(status='draft'))
 
             # Filter by status flag supplied by the client
             if status == 'starred':
