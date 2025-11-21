@@ -7,6 +7,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiPara
 from drf_spectacular.types import OpenApiTypes
 from django.conf import settings
 from django.utils import timezone
+from django.utils.html import strip_tags
 from django.http import FileResponse, Http404
 from .models import Mail, MailAttachment, MailParticipantStatus
 from .serializers import MailSerializer, CreateTaskFromMailSerializer
@@ -256,13 +257,16 @@ class MailViewSet(viewsets.ModelViewSet):
                     logger.error(f"Mail {mail_instance.id}: Failed to read attachment {attachment.filename}: {e}")
         
         # Send email via SMTP2GO
+        plain_text_body = strip_tags(mail_instance.body or '')
+
         result = send_email_via_smtp2go(
             to_emails=recipients,
             subject=mail_instance.subject,
-            text_body=mail_instance.body,
+            text_body=plain_text_body or mail_instance.body or '',
             sender_email=from_email,
             cc_emails=cc_recipients if cc_recipients else None,
             bcc_emails=bcc_recipients if bcc_recipients else None,
+            html_body=mail_instance.body,
             attachments=attachments if attachments else None
         )
         
