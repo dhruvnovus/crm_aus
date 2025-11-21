@@ -7,6 +7,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiPara
 from drf_spectacular.types import OpenApiTypes
 from django.conf import settings
 from django.utils import timezone
+from django.http import FileResponse, Http404
 from .models import Mail, MailAttachment, MailParticipantStatus
 from .serializers import MailSerializer, CreateTaskFromMailSerializer
 from .email_service import send_email_via_smtp2go
@@ -103,7 +104,9 @@ class MailViewSet(viewsets.ModelViewSet):
         is_starred = self.request.query_params.get('is_starred')
         is_read = self.request.query_params.get('is_read')
 
-        if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
+        # Skip employee_id requirement for download_attachment action
+        # Authentication and permissions are handled by get_object() and the action itself
+        if self.request.method in ['GET', 'HEAD', 'OPTIONS'] and self.action != 'download_attachment':
             if not employee_id:
                 raise ValidationError({'employee_id': 'This query parameter is required.'})
             try:
@@ -181,9 +184,31 @@ class MailViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _actor(self):
+        """Get authenticated Employee from request user"""
         user = getattr(self.request, 'user', None)
-        if user and hasattr(user, 'id'):
-            return Employee.objects.filter(id=user.id).first()
+        if not user:
+            return None
+        
+        # If user is already an Employee instance, return it
+        if isinstance(user, Employee):
+            return user
+        
+        # Try to get Employee by email (since User.username is email)
+        if hasattr(user, 'email'):
+            employee = Employee.objects.filter(email=user.email, is_active=True).first()
+            if employee:
+                return employee
+        elif hasattr(user, 'username'):
+            employee = Employee.objects.filter(email=user.username, is_active=True).first()
+            if employee:
+                return employee
+        
+        # Fallback: try direct ID match (in case Employee ID matches User ID)
+        if hasattr(user, 'id'):
+            employee = Employee.objects.filter(id=user.id, is_active=True).first()
+            if employee:
+                return employee
+        
         return None
 
     def _send_email(self, mail_instance): 
@@ -541,3 +566,87 @@ class MailViewSet(viewsets.ModelViewSet):
     #     )
     #     serializer = self.get_serializer(mail, context={'request': request})
     #     return Response(serializer.data)
+
+    @extend_schema(
+        summary="Download mail attachment",
+        description="Download a specific attachment file from a mail",
+        tags=["Mails"],
+        responses={200: OpenApiTypes.BINARY},
+    )
+    @action(detail=True, methods=['get'], url_path='attachments/(?P<attachment_id>[^/.]+)/download')
+    def download_attachment(self, request, pk=None, attachment_id=None):
+        """Download a specific attachment file from a mail"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            mail = self.get_object()
+        except Exception as e:
+            logger.error(f"Error getting mail object: {str(e)}", exc_info=True)
+            return Response(
+                {'detail': 'Mail not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Verify user has access to this mail
+        # Access is granted if user is:
+        # 1. The sender
+        # 2. In the receivers (ManyToMany)
+        # 3. Their email is in to_emails, cc_emails, or bcc_emails
+        authenticated_employee = self._actor()
+        if not authenticated_employee:
+            return Response(
+                {'detail': 'Authentication required.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        has_access = False
+        user_email = authenticated_employee.email.lower() if authenticated_employee.email else None
+        
+        # Check if user is sender
+        if mail.sender_id == authenticated_employee.id:
+            has_access = True
+        
+        # Check if user is in receivers (ManyToMany)
+        if not has_access:
+            has_access = mail.receivers.filter(id=authenticated_employee.id).exists()
+        
+        # Check if user's email is in to_emails, cc_emails, or bcc_emails
+        if not has_access and user_email:
+            to_emails = [e.lower() for e in (mail.to_emails or []) if isinstance(e, str)]
+            cc_emails = [e.lower() for e in (mail.cc_emails or []) if isinstance(e, str)]
+            bcc_emails = [e.lower() for e in (mail.bcc_emails or []) if isinstance(e, str)]
+            
+            has_access = (
+                user_email in to_emails or
+                user_email in cc_emails or
+                user_email in bcc_emails
+            )
+        
+        if not has_access:
+            return Response(
+                {'detail': 'You do not have permission to access this mail.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            attachment = MailAttachment.objects.get(id=attachment_id, mail=mail)
+            if not attachment.file:
+                raise Http404("File not found")
+            
+            # Open file and create response
+            file_handle = attachment.file.open()
+            response = FileResponse(
+                file_handle,
+                content_type=attachment.content_type or 'application/octet-stream'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
+            return response
+        except MailAttachment.DoesNotExist:
+            raise Http404("Attachment not found")
+        except Exception as e:
+            logger.error(f"Error downloading attachment {attachment_id}: {str(e)}", exc_info=True)
+            return Response(
+                {'detail': f'Error downloading attachment: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

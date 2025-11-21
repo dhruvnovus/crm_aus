@@ -12,10 +12,23 @@ from django.conf import settings
 from employee.models import Employee
 from .models import MailParticipantStatus
 class MailAttachmentSerializer(serializers.ModelSerializer):
+    download_url = serializers.SerializerMethodField()
+    
     class Meta:
         model = MailAttachment
-        fields = ['id', 'filename', 'content_type', 'file_size', 'uploaded_at']
+        fields = ['id', 'filename', 'content_type', 'file_size', 'uploaded_at', 'download_url']
         read_only_fields = fields
+        
+    def get_download_url(self, obj):
+        """Return the URL to download the attachment file"""
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                # Build URL for the download endpoint
+                return request.build_absolute_uri(
+                    f'/api/mails/{obj.mail_id}/attachments/{obj.id}/download/'
+                )
+        return None
 
 
 @extend_schema_field(OpenApiTypes.BOOL)

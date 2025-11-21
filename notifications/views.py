@@ -333,28 +333,82 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
                 logger.info(f"Stream: Resolved Employee ID {employee.id} via ViewSet authentication")
         
         if not employee:
-            return Response(
+            error_response = Response(
                 {'error': 'Authentication required. Provide JWT token via Authorization header or ?token query parameter.'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+            # Add CORS headers to error response
+            self._add_cors_headers(error_response, request)
+            return error_response
         
-        # Subscribe to notification events using Employee ID
-        employee_id = employee.id
-        logger.info(f"Stream: Subscribing to notifications for Employee ID {employee_id}")
-        event_queue = publisher.subscribe(employee_id)
+        try:
+            # Subscribe to notification events using Employee ID
+            employee_id = employee.id
+            logger.info(f"Stream: Subscribing to notifications for Employee ID {employee_id}")
+            event_queue = publisher.subscribe(employee_id)
+            
+            # Create SSE response
+            response = StreamingHttpResponse(
+                event_stream(employee_id, event_queue),
+                content_type='text/event-stream; charset=utf-8'
+            )
+            
+            # Set headers for SSE and Heroku compatibility
+            response['Cache-Control'] = 'no-cache, no-transform'
+            response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx/proxies
+            # Note: Connection: keep-alive is a hop-by-hop header handled by the web server/proxy
+            # Do not set it here as WSGI doesn't allow hop-by-hop headers
+            # Heroku-specific: prevent router timeout by ensuring regular data flow
+            response['X-Content-Type-Options'] = 'nosniff'
+            
+            # Add CORS headers
+            self._add_cors_headers(response, request)
+            
+            return response
+        except Exception as e:
+            logger.error(f"Stream: Error creating SSE stream: {str(e)}", exc_info=True)
+            error_response = Response(
+                {'error': 'Failed to create notification stream', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            # Add CORS headers to error response
+            self._add_cors_headers(error_response, request)
+            return error_response
+    
+    def _add_cors_headers(self, response, request):
+        """
+        Helper method to add CORS headers to a response.
+        Works with both regular Response and StreamingHttpResponse objects.
+        """
+        from django.conf import settings
         
-        # Create SSE response
-        response = StreamingHttpResponse(
-            event_stream(employee_id, event_queue),
-            content_type='text/event-stream; charset=utf-8'
-        )
+        # CORS headers for SSE (required for cross-origin requests)
+        # Note: When CORS_ALLOW_CREDENTIALS is True, we cannot use '*' for Access-Control-Allow-Origin
+        origin = request.META.get('HTTP_ORIGIN')
         
-        # Set headers for SSE and Heroku compatibility
-        response['Cache-Control'] = 'no-cache, no-transform'
-        response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx/proxies
-        response['Connection'] = 'keep-alive'
-        # Heroku-specific: prevent router timeout by ensuring regular data flow
-        response['X-Content-Type-Options'] = 'nosniff'
+        if origin:
+            # Check if origin is allowed
+            if getattr(settings, 'CORS_ALLOW_ALL_ORIGINS', False):
+                # Allow all origins - set the specific origin (required when credentials=True)
+                response['Access-Control-Allow-Origin'] = origin
+            elif hasattr(settings, 'CORS_ALLOWED_ORIGINS'):
+                if origin in settings.CORS_ALLOWED_ORIGINS:
+                    response['Access-Control-Allow-Origin'] = origin
+            else:
+                # Default: allow the requesting origin
+                response['Access-Control-Allow-Origin'] = origin
+        else:
+            # If no origin header, check if we should allow all
+            if getattr(settings, 'CORS_ALLOW_ALL_ORIGINS', False):
+                # Can't use '*' with credentials, but since there's no origin header,
+                # this is likely a same-origin request or a non-browser client
+                response['Access-Control-Allow-Origin'] = '*'
         
-        return response
+        # Only set credentials header if CORS_ALLOW_CREDENTIALS is True
+        if getattr(settings, 'CORS_ALLOW_CREDENTIALS', False):
+            response['Access-Control-Allow-Credentials'] = 'true'
+        
+        response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, Cache-Control'
+        response['Access-Control-Expose-Headers'] = 'Content-Type, Cache-Control'
 
