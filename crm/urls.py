@@ -49,5 +49,5 @@ if settings.DEBUG:
 else:
     # Serve media files even when DEBUG=False (for development)
     urlpatterns += [
-        re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+        re_path(r'^uploads/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
     ]

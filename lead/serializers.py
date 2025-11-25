@@ -120,6 +120,18 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
         """
         return (value or '').strip().lower()
     
+    def validate_event(self, value):
+        """
+        Validate event is one of the allowed choices
+        """
+        if value:
+            valid_events = [choice[0] for choice in Lead.EVENT_CHOICES]
+            if value not in valid_events:
+                raise serializers.ValidationError(
+                    f"Invalid event. Must be one of: {', '.join(valid_events)}"
+                )
+        return value
+    
     def validate_custom_email_addresses(self, value):
         """
         Validate custom email addresses format

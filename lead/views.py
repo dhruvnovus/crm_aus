@@ -983,8 +983,31 @@ class LeadViewSet(viewsets.ModelViewSet):
         if normalized_row.get('address', ''):
             lead_data['address'] = normalized_row.get('address', '')
         
-        if normalized_row.get('event', ''):
-            lead_data['event'] = normalized_row.get('event', '')
+        # Event - validate against EVENT_CHOICES
+        event_value = (
+            normalized_row.get('event', '') or 
+            normalized_row.get('event_name', '') or
+            normalized_row.get('eventname', '') or
+            normalized_row.get('event name', '')
+        ).strip()
+        if event_value:
+            # Check if it's a valid event choice
+            valid_events = [choice[0] for choice in Lead.EVENT_CHOICES]
+            if event_value in valid_events:
+                lead_data['event'] = event_value
+            else:
+                # Try case-insensitive match
+                event_lower = event_value.lower()
+                matched = False
+                for valid_event in valid_events:
+                    if valid_event.lower() == event_lower:
+                        lead_data['event'] = valid_event
+                        matched = True
+                        break
+                # If no match, use default or leave empty (will use model default)
+                if not matched:
+                    # Optionally log or use default
+                    lead_data['event'] = Lead._meta.get_field('event').default
         
         # Lead type
         lead_type = (
