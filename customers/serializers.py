@@ -22,6 +22,27 @@ class CustomerListSerializer(serializers.ModelSerializer):
 	company_logo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 	contact_number = serializers.CharField(source='mobile_phone', read_only=True)
 	email_address = serializers.EmailField(source='email', read_only=True)
+	secondary_mobile_numbers = serializers.ListField(
+		child=serializers.CharField(), 
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
+	secondary_mobile_phone_code = serializers.ListField(
+		child=serializers.CharField(),
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
+	secondary_mobile_type = serializers.ListField(
+		child=serializers.CharField(),
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
 	class Meta:
 		model = Customer
 		fields = [
@@ -47,6 +68,27 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
 	company_logo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 	contact_number = serializers.CharField(source='mobile_phone', read_only=True)
 	email_address = serializers.EmailField(source='email', read_only=True)
+	secondary_mobile_numbers = serializers.ListField(
+		child=serializers.CharField(), 
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
+	secondary_mobile_phone_code = serializers.ListField(
+		child=serializers.CharField(),
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
+	secondary_mobile_type = serializers.ListField(
+		child=serializers.CharField(),
+		required=False,
+		allow_empty=True,
+		allow_null=True,
+		read_only=True
+	)
 
 	class Meta:
 		model = Customer
