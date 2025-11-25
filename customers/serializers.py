@@ -72,7 +72,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 	company_logo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 	full_name = serializers.SerializerMethodField()
 	secondary_mobile_numbers = serializers.ListField(
-		child=serializers.CharField(),
+		child=serializers.CharField(), 
 		required=False,
 		allow_empty=True,
 		allow_null=True

@@ -15,4 +15,4 @@ class Migration(migrations.Migration):
             name='secondary_mobile_type',
             field=models.JSONField(blank=True, choices=[('technical contact', 'Technical Contact'), ('financial contact', 'Financial Contact'), ('hr contact', 'HR Contact'), ('support contact', 'Support Contact'), ('sales contact', 'Sales Contact'), ('additional contact', 'Additional Contact')], default=list, help_text='List of secondary mobile types', null=True),
         ),
-    ]
+    ] 
