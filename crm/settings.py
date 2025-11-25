@@ -236,8 +236,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Media files settings
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = '/uploads/'
+MEDIA_ROOT = BASE_DIR / 'uploads'
 
 # Security settings
 SECURE_SSL_REDIRECT = False  # Set to True in production

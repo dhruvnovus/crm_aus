@@ -121,6 +121,18 @@ class Lead(models.Model):
         ('Sydney', 'Sydney Sept 2026'),
         ('Melbourne', 'Melbourne 20 Jun 2026 (Two Day)'),
     ]
+
+    EVENT_CHOICES = [
+    ("Aged & Disability Expo", "Aged & Disability Expo"),
+    ("Aged & Disability Expo Adelaide", "Aged & Disability Expo Adelaide"),
+    ("Aged & Disability Expo Burnie", "Aged & Disability Expo Burnie"),
+    ("Aged & Disability Expo Devonport", "Aged & Disability Expo Devonport"),
+    ("Aged & Disability Expo Gold Coast", "Aged & Disability Expo Gold Coast"),
+    ("Aged & Disability Expo Gold Coast 2026", "Aged & Disability Expo Gold Coast 2026"),
+    ("Aged & Disability Expo Hobart", "Aged & Disability Expo Hobart"),
+    ("Aged & Disability Expo Launceston", "Aged & Disability Expo Launceston"),
+    ]
+
     # Personal Information
     title = models.CharField(
         max_length=10,
@@ -167,9 +179,11 @@ class Lead(models.Model):
     # Lead Details
     event = models.CharField(
         max_length=200,
+        choices=EVENT_CHOICES,
         blank=True,
         null=True,
-        help_text="Associated event"
+        help_text="Associated event",
+        default="Aged & Disability Expo",
     )
     lead_type = models.CharField(
         max_length=20,
