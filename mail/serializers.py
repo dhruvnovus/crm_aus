@@ -11,6 +11,8 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.conf import settings
 from employee.models import Employee
 from .models import MailParticipantStatus
+
+
 class MailAttachmentSerializer(serializers.ModelSerializer):
     download_url = serializers.SerializerMethodField()
     
@@ -75,16 +77,42 @@ class MailSerializer(serializers.ModelSerializer):
     receivers = serializers.SerializerMethodField(read_only=True)
     is_starred = ParticipantStatusBooleanField(getter_name='get_is_starred', required=False)
     is_read = ParticipantStatusBooleanField(getter_name='get_is_read', required=False)
+    templates = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+        allow_null=True
+    )
 
     class Meta:
         model = Mail
         fields = [
             'id', 'from_email', 'to_emails', 'cc_emails', 'bcc_emails',
-            'subject', 'body', 'direction', 'status', 'is_starred', 'scheduled_at',
+            'subject', 'body', 'templates', 'direction', 'status', 'is_starred', 'scheduled_at',
             'attachments', 'files', 'created_at', 'updated_at',
             'sender_id', 'receiver_ids', 'sender', 'receivers', 'is_read'
         ]
         read_only_fields = ['created_at', 'updated_at', 'attachments', 'sender', 'receivers']
+
+    def validate_templates(self, value):
+        """
+        Ensure each template key is one of the allowed choices defined on the model.
+        """
+        if not value:
+            return []
+
+        allowed = set(Mail.TEMPLATE_CHOICES)
+        cleaned = []
+        for item in value:
+            key = str(item).strip()
+            if not key:
+                continue
+            if key not in allowed:
+                raise serializers.ValidationError(
+                    f"Invalid template key '{key}'. Allowed: {', '.join(sorted(allowed))}"
+                )
+            cleaned.append(key)
+        return cleaned
 
     def _resolve_context_employee_id(self, include_sender_fallback=False):
         request = self.context.get('request')
@@ -120,30 +148,38 @@ class MailSerializer(serializers.ModelSerializer):
         return value
 
     def validate_cc_emails(self, value):
+        # In multipart forms we always get a list; clean out blanks first
         if value in (None, ''):
             return []
         if not isinstance(value, list):
             raise serializers.ValidationError('cc_emails must be a list')
+        cleaned = [e for e in value if isinstance(e, str) and e.strip()]
+        if not cleaned:
+            return []
         validator = EmailValidator()
-        for idx, email in enumerate(value):
+        for idx, email in enumerate(cleaned):
             try:
                 validator(email)
             except DjangoValidationError:
                 raise serializers.ValidationError({idx: f'Invalid email: {email}'})
-        return value
+        return cleaned
 
     def validate_bcc_emails(self, value):
+        # In multipart forms we always get a list; clean out blanks first
         if value in (None, ''):
             return []
         if not isinstance(value, list):
             raise serializers.ValidationError('bcc_emails must be a list')
+        cleaned = [e for e in value if isinstance(e, str) and e.strip()]
+        if not cleaned:
+            return []
         validator = EmailValidator()
-        for idx, email in enumerate(value):
+        for idx, email in enumerate(cleaned):
             try:
                 validator(email)
             except DjangoValidationError:
                 raise serializers.ValidationError({idx: f'Invalid email: {email}'})
-        return value
+        return cleaned
 
     def _coerce_email_list(self, data, key):
         if key not in data:
@@ -173,11 +209,11 @@ class MailSerializer(serializers.ModelSerializer):
         if hasattr(data, 'getlist'):
             keys = list(data.keys())
             normalized = {}
-            list_like_keys = {'to_emails', 'cc_emails', 'bcc_emails', 'files', 'receiver_ids'}
+            list_like_keys = {'to_emails', 'cc_emails', 'bcc_emails', 'files', 'receiver_ids', 'templates'}
             for k in keys:
                 if k in list_like_keys:
                     vals = data.getlist(k)
-                    normalized[k] = vals if len(vals) > 1 else (vals[0] if vals else [])
+                    normalized[k] = vals
                 else:
                     normalized[k] = data.get(k)
             mutable = normalized

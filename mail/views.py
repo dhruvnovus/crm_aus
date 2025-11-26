@@ -8,6 +8,7 @@ from drf_spectacular.types import OpenApiTypes
 from django.conf import settings
 from django.utils import timezone
 from django.utils.html import strip_tags
+from django.template.loader import render_to_string
 from django.http import FileResponse, Http404
 from .models import Mail, MailAttachment, MailParticipantStatus
 from .serializers import MailSerializer, CreateTaskFromMailSerializer
@@ -20,6 +21,12 @@ from rest_framework.exceptions import ValidationError
 from django.db.models import Q
 logger = logging.getLogger(__name__)
 
+# Map Mail.template keys to actual Django template files
+TEMPLATE_MAP = {
+    # DEA CRM branded template
+    'dea_crm': 'mail/mail_template1.html',
+    'dea_crm_2': 'mail/mail_template2.html',
+}
 
 @extend_schema_view(
     list=extend_schema(
@@ -256,17 +263,66 @@ class MailViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f"Mail {mail_instance.id}: Failed to read attachment {attachment.filename}: {e}")
         
-        # Send email via SMTP2GO
-        plain_text_body = strip_tags(mail_instance.body or '')
+        # Build receiver display name(s) for template
+        receiver_name = None
+        try:
+            receiver_employees = list(mail_instance.receivers.all())
+            if receiver_employees:
+                full_names = []
+                for emp in receiver_employees:
+                    first = (emp.first_name or "").strip()
+                    last = (emp.last_name or "").strip()
+                    name = f"{first} {last}".strip() or (emp.email or "").strip()
+                    if name:
+                        full_names.append(name)
+                if full_names:
+                    receiver_name = ", ".join(full_names)
+        except Exception:
+            # Fail silently – template will fall back to 'Customer'
+            receiver_name = None
 
+        # Resolve which HTML template to use based on Mail.templates field
+        template_list = getattr(mail_instance, 'templates', None) or []
+        if isinstance(template_list, list) and template_list:
+            template_key = template_list[0]
+        else:
+            template_key = 'dea_crm'
+        template_name = TEMPLATE_MAP.get(template_key, TEMPLATE_MAP['dea_crm'])
+
+        # Render mail body using selected HTML template
+        try:
+            html_body = render_to_string(
+                template_name,
+                {
+                    "subject": mail_instance.subject,
+                    "body_html": mail_instance.body or "",
+                    "from_email": from_email,
+                    "receiver_name": receiver_name,
+                    "to_emails": recipients,
+                    "cc_emails": cc_recipients,
+                    "bcc_emails": bcc_recipients,
+                    "mail": mail_instance,
+                },
+            )
+        except Exception as e:
+            # Fallback to raw body if template rendering fails
+            logger.error(
+                f"Mail {mail_instance.id}: Failed to render template '{template_name}': {e}",
+                exc_info=True,
+            )
+            html_body = mail_instance.body or ""
+
+        plain_text_body = strip_tags(html_body) or (mail_instance.body or "")
+
+        # Send email via SMTP2GO
         result = send_email_via_smtp2go(
             to_emails=recipients,
             subject=mail_instance.subject,
-            text_body=plain_text_body or mail_instance.body or '',
+            text_body=plain_text_body,
             sender_email=from_email,
             cc_emails=cc_recipients if cc_recipients else None,
             bcc_emails=bcc_recipients if bcc_recipients else None,
-            html_body=mail_instance.body,
+            html_body=html_body,
             attachments=attachments if attachments else None
         )
         

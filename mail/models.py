@@ -18,7 +18,10 @@ class Mail(models.Model):
         ('sent', 'Sent'),
         ('scheduled', 'Scheduled'),
     ]
-
+    TEMPLATE_CHOICES = [
+        'dea_crm',
+        'dea_crm_2',
+    ]
     sender = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='mails')
     receivers = models.ManyToManyField(Employee, related_name='received_mails', blank=True)
     from_email = models.EmailField(max_length=255, blank=True, null=True)
@@ -27,6 +30,11 @@ class Mail(models.Model):
     bcc_emails = models.JSONField(default=list, blank=True)
     subject = models.CharField(max_length=255)
     body = models.TextField()
+    templates = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of template keys to use when sending (e.g. ['dea_crm'])",
+    )
     direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='outbound')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
     scheduled_at = models.DateTimeField(blank=True, null=True)
