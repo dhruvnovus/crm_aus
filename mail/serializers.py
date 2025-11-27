@@ -77,18 +77,12 @@ class MailSerializer(serializers.ModelSerializer):
     receivers = serializers.SerializerMethodField(read_only=True)
     is_starred = ParticipantStatusBooleanField(getter_name='get_is_starred', required=False)
     is_read = ParticipantStatusBooleanField(getter_name='get_is_read', required=False)
-    templates = serializers.ListField(
-        child=serializers.CharField(),
-        required=False,
-        allow_empty=True,
-        allow_null=True
-    )
 
     class Meta:
         model = Mail
         fields = [
             'id', 'from_email', 'to_emails', 'cc_emails', 'bcc_emails',
-            'subject', 'body', 'templates', 'direction', 'status', 'is_starred', 'scheduled_at',
+            'subject', 'body', 'template', 'direction', 'status', 'is_starred', 'scheduled_at',
             'attachments', 'files', 'created_at', 'updated_at',
             'sender_id', 'receiver_ids', 'sender', 'receivers', 'is_read'
         ]
@@ -97,27 +91,25 @@ class MailSerializer(serializers.ModelSerializer):
             # Subject and body are optional – allow empty / null
             'subject': {'required': False, 'allow_blank': True, 'allow_null': True},
             'body': {'required': False, 'allow_blank': True, 'allow_null': True},
+            # Template is optional; model has default
+            'template': {'required': False, 'allow_blank': True, 'allow_null': True},
         }
 
-    def validate_templates(self, value):
+    def _split_comma_separated(self, items):
         """
-        Ensure each template key is one of the allowed choices defined on the model.
+        Accept values like "a@x.com,b@y.com" and normalize to ["a@x.com", "b@y.com"]
+        for email fields. For templates we now use a single CharField on the model.
         """
-        if not value:
+        if not items:
             return []
-
-        allowed = set(Mail.TEMPLATE_CHOICES)
-        cleaned = []
-        for item in value:
-            key = str(item).strip()
-            if not key:
-                continue
-            if key not in allowed:
-                raise serializers.ValidationError(
-                    f"Invalid template key '{key}'. Allowed: {', '.join(sorted(allowed))}"
-                )
-            cleaned.append(key)
-        return cleaned
+        normalized = []
+        for item in items:
+            if isinstance(item, str) and (',' in item or ';' in item):
+                parts = [p.strip() for p in item.replace(';', ',').split(',') if p.strip()]
+                normalized.extend(parts)
+            else:
+                normalized.append(item)
+        return normalized
 
     def _resolve_context_employee_id(self, include_sender_fallback=False):
         request = self.context.get('request')
@@ -139,6 +131,8 @@ class MailSerializer(serializers.ModelSerializer):
         return employee_id
 
     def validate_to_emails(self, value):
+        # Allow comma-separated strings from Swagger / multipart
+        value = self._split_comma_separated(value)
         if not isinstance(value, list) or len(value) == 0:
             raise serializers.ValidationError('to_emails must be a non-empty list')
         validator = EmailValidator()
@@ -214,7 +208,7 @@ class MailSerializer(serializers.ModelSerializer):
         if hasattr(data, 'getlist'):
             keys = list(data.keys())
             normalized = {}
-            list_like_keys = {'to_emails', 'cc_emails', 'bcc_emails', 'files', 'receiver_ids', 'templates'}
+            list_like_keys = {'to_emails', 'cc_emails', 'bcc_emails', 'files', 'receiver_ids'}
             for k in keys:
                 if k in list_like_keys:
                     vals = data.getlist(k)
@@ -438,10 +432,19 @@ class MailSerializer(serializers.ModelSerializer):
         if isinstance(value, list):
             numeric = []
             for item in value:
-                try:
-                    numeric.append(int(item))
-                except (ValueError, TypeError):
-                    continue
+                # Support items like "22,9" coming from multipart getlist
+                if isinstance(item, str) and (',' in item or ';' in item):
+                    parts = [p.strip() for p in item.replace(';', ',').split(',') if p.strip()]
+                    for p in parts:
+                        try:
+                            numeric.append(int(p))
+                        except (ValueError, TypeError):
+                            continue
+                else:
+                    try:
+                        numeric.append(int(item))
+                    except (ValueError, TypeError):
+                        continue
             data[key] = numeric
             return data
         if value in (None, ''):

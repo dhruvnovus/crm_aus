@@ -189,12 +189,16 @@
 
     .social-icons {
       background:rgb(229, 232, 238);
-      padding: 1px 0;
+      padding: 4px 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px; /* equal space between icons */
     }
 
     .social-icons a {
       display: inline-block;
-      margin: 0 6px;
+      margin: 0;
     }
 
     .social-icons img {
@@ -259,7 +263,7 @@
             </div>
             <div class="brand-text">
               <span class="brand-name">DEA&nbsp;CRM</span>
-              <span class="brand-tagline">Disability Expos Australia</span>
+              <span class="brand-tagline">Disability Expo Australia</span>
             </div>
           </div>
         </td>
@@ -332,8 +336,8 @@
       <!-- Footer legal -->
       <tr>
         <td class="footer">
-          © {{ mail.created_at|date:"Y" }} Disability Expos Australia / DEA CRM.<br>
-          You are receiving this email as part of your relationship with Disability Expos Australia.
+          © {{ mail.created_at|date:"Y" }} Disability Expo Australia / DEA CRM.<br>
+          You are receiving this email as part of your relationship with Disability Expo Australia.
           If this message was not intended for you, please contact support.
         </td>
       </tr>

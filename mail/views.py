@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 # Map Mail.template keys to actual Django template files
 TEMPLATE_MAP = {
     # DEA CRM branded template
-    'template_1': 'mail/mail_template1.html',
-    'template_2': 'mail/mail_template2.html',
-    'template_3': 'mail/mail_template3.html',
-    'template_4': 'mail/mail_template4.html',
-    'template_5': 'mail/mail_template5.html',
+    'Template 1': 'mail/mail_template1.html',
+    'Template 2': 'mail/mail_template2.html',
+    'Template 3': 'mail/mail_template3.html',
+    'Template 4': 'mail/mail_template4.html',
+    'Template 5': 'mail/mail_template5.html',
 }
 
 @extend_schema_view(
@@ -266,76 +266,79 @@ class MailViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f"Mail {mail_instance.id}: Failed to read attachment {attachment.filename}: {e}")
         
-        # Build receiver display name(s) for template
-        receiver_name = None
+        # Build mapping from email -> display name so each recipient gets their own name
+        email_to_name = {}
         try:
             receiver_employees = list(mail_instance.receivers.all())
-            if receiver_employees:
-                full_names = []
-                for emp in receiver_employees:
-                    first = (emp.first_name or "").strip()
-                    last = (emp.last_name or "").strip()
-                    name = f"{first} {last}".strip() or (emp.email or "").strip()
-                    if name:
-                        full_names.append(name)
-                if full_names:
-                    receiver_name = ", ".join(full_names)
+            for emp in receiver_employees:
+                email = (emp.email or "").strip().lower()
+                if not email:
+                    continue
+                first = (emp.first_name or "").strip()
+                last = (emp.last_name or "").strip()
+                name = f"{first} {last}".strip() or email
+                email_to_name[email] = name
         except Exception:
-            # Fail silently – template will fall back to 'Customer'
-            receiver_name = None
+            # Fail silently – template will fall back to 'Customer' or raw email
+            email_to_name = {}
 
-        # Resolve which HTML template to use based on Mail.templates field
-        template_list = getattr(mail_instance, 'templates', None) or []
-        if isinstance(template_list, list) and template_list:
-            template_key = template_list[0]
-        else:
-            template_key = 'dea_crm'
-        template_name = TEMPLATE_MAP.get(template_key, TEMPLATE_MAP['dea_crm'])
+        # Resolve which HTML template to use based on Mail.template field
+        template_key = getattr(mail_instance, 'template', None) or 'Template 1'
+        template_name = TEMPLATE_MAP.get(template_key, TEMPLATE_MAP['Template 1'])
 
-        # Render mail body using selected HTML template
-        try:
-            html_body = render_to_string(
-                template_name,
-                {
-                    "subject": mail_instance.subject,
-                    "body_html": mail_instance.body or "",
-                    "from_email": from_email,
-                    "receiver_name": receiver_name,
-                    "to_emails": recipients,
-                    "cc_emails": cc_recipients,
-                    "bcc_emails": bcc_recipients,
-                    "mail": mail_instance,
-                },
+        # Send one personalized email per recipient so each sees their own name
+        all_success = True
+        for email in recipients:
+            if not email:
+                continue
+            email_str = str(email).strip()
+            if not email_str:
+                continue
+            receiver_name = email_to_name.get(email_str.lower(), email_str)
+
+            try:
+                html_body = render_to_string(
+                    template_name,
+                    {
+                        "subject": mail_instance.subject,
+                        "body_html": mail_instance.body or "",
+                        "from_email": from_email,
+                        "receiver_name": receiver_name,
+                        "to_emails": [email_str],
+                        "cc_emails": cc_recipients,
+                        "bcc_emails": bcc_recipients,
+                        "mail": mail_instance,
+                    },
+                )
+            except Exception as e:
+                # Fallback to raw body if template rendering fails
+                logger.error(
+                    f"Mail {mail_instance.id}: Failed to render template '{template_name}' for {email_str}: {e}",
+                    exc_info=True,
+                )
+                html_body = mail_instance.body or ""
+
+            plain_text_body = strip_tags(html_body) or (mail_instance.body or "")
+
+            result = send_email_via_smtp2go(
+                to_emails=[email_str],
+                subject=mail_instance.subject,
+                text_body=plain_text_body,
+                sender_email=from_email,
+                cc_emails=cc_recipients if cc_recipients else None,
+                bcc_emails=bcc_recipients if bcc_recipients else None,
+                html_body=html_body,
+                attachments=attachments if attachments else None
             )
-        except Exception as e:
-            # Fallback to raw body if template rendering fails
-            logger.error(
-                f"Mail {mail_instance.id}: Failed to render template '{template_name}': {e}",
-                exc_info=True,
-            )
-            html_body = mail_instance.body or ""
 
-        plain_text_body = strip_tags(html_body) or (mail_instance.body or "")
+            if result.get('success'):
+                logger.info(f"Mail {mail_instance.id}: Email sent successfully via SMTP2GO to {email_str}")
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"Mail {mail_instance.id}: Failed to send email via SMTP2GO to {email_str}: {error_msg}")
+                all_success = False
 
-        # Send email via SMTP2GO
-        result = send_email_via_smtp2go(
-            to_emails=recipients,
-            subject=mail_instance.subject,
-            text_body=plain_text_body,
-            sender_email=from_email,
-            cc_emails=cc_recipients if cc_recipients else None,
-            bcc_emails=bcc_recipients if bcc_recipients else None,
-            html_body=html_body,
-            attachments=attachments if attachments else None
-        )
-        
-        if result.get('success'):
-            logger.info(f"Mail {mail_instance.id}: Email sent successfully via SMTP2GO to {recipients}")
-            return True
-        else:
-            error_msg = result.get('error', 'Unknown error')
-            logger.error(f"Mail {mail_instance.id}: Failed to send email via SMTP2GO: {error_msg}")
-            return False
+        return all_success
 
     def update(self, request, *args, **kwargs):
         """
