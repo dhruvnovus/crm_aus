@@ -36,12 +36,19 @@
     color:#fff;
   }
 
+  .hero-inner{
+    max-width:560px;
+    margin:0 auto; /* center the whole Test-final block */
+  }
+
   .title{font-size:28px;font-family:Segoe UI,Arial,sans-serif;font-weight:700;margin:10px 0 6px;}
   .subtitle{font-size:15px;opacity:0.95;}
 
   /* Body */
   .body-card{
     padding:32px;
+    max-width:560px;       /* keep content column narrow */
+    margin:0 auto;         /* center body like in the email client */
   }
 
   .lead{font-size:16px;font-family:Segoe UI,Arial,sans-serif;margin:0 0 18px;color:#0b1220;}
@@ -79,17 +86,19 @@
     <table class="email-container" width="100%">
       <!-- HERO IMAGE -->
       <tr>
-        <td align="center" style="padding:20px;">
+        <td align="center" style="padding:20px; text-align:center;">
           <img src="https://wpstaq-ap-southeast-2-media.s3.amazonaws.com/disabilityexpos/wp-content/uploads/media/2025/10/DEA-Connecting-Communities.jpg"
-               width="140" style="border-radius:10px;">
+               width="140" style="border-radius:10px; display:block; margin:0 auto;">
         </td>
       </tr>
 
       <!-- HERO SECTION -->
       <tr>
         <td class="hero">
-          <div class="title">{{ subject|capfirst }}</div>
-          <div class="subtitle">A message from Disability Expo Australia</div>
+          <div class="hero-inner">
+            <div class="title">{{ subject|capfirst }}</div>
+            <div class="subtitle">A message from Disability Expo Australia</div>
+          </div>
         </td>
       </tr>
 

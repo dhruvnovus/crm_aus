@@ -287,7 +287,10 @@ class MailViewSet(viewsets.ModelViewSet):
         template_name = TEMPLATE_MAP.get(template_key, TEMPLATE_MAP['Template 1'])
 
         # Send one personalized email per recipient so each sees their own name
+        # Also persist the first rendered HTML back to Mail.body so the API
+        # returns the full template (header/footer) for the web UI.
         all_success = True
+        persisted_rendered_body = False
         for email in recipients:
             if not email:
                 continue
@@ -310,6 +313,21 @@ class MailViewSet(viewsets.ModelViewSet):
                         "mail": mail_instance,
                     },
                 )
+
+                # Overwrite stored body once with the rendered HTML so that
+                # API consumers (React app) can display the exact same content
+                # that was sent via SMTP.
+                if not persisted_rendered_body:
+                    mail_instance.body = html_body
+                    try:
+                        mail_instance.save(update_fields=["body", "updated_at"])
+                    except Exception:
+                        # Do not block sending if we fail to persist the HTML
+                        logger.warning(
+                            f"Mail {mail_instance.id}: Failed to persist rendered HTML body; continuing to send emails",
+                            exc_info=True,
+                        )
+                    persisted_rendered_body = True
             except Exception as e:
                 # Fallback to raw body if template rendering fails
                 logger.error(

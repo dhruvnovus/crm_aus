@@ -48,8 +48,8 @@
     }
 
     .brand-logo {
-      width: 30px;
-      height: 30px;
+      width: 32px;
+      height: 32px;
       border-radius: 999px;
       overflow: hidden;
     }
@@ -57,7 +57,7 @@
     .brand-logo img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: cover; /* circular brand icon */
     }
 
     .brand-name {
@@ -112,7 +112,10 @@
     }
 
     .hero-image {
-      width: 60px; /* reduce image height to shrink hero block */
+      width: 52px;
+      height: 52px;
+      border-radius: 999px;  /* circle hero icon */
+      object-fit: cover;
     }
 
     /* Main body text (rich) */
@@ -177,8 +180,11 @@
     }
 
     .social-row img {
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px; /* circle social icons */
+      object-fit: cover;
+      display: block;
     }
 
     @media (max-width: 480px) {
