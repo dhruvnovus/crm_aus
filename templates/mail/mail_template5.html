@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ subject|capfirst }}</title>
+
+  <style>
+    /* Reset */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #e5e7eb;
+    }
+    table { border-collapse: collapse; }
+    img { border: 0; display: block; max-width: 100%; height: auto; }
+    a { text-decoration: none; color: inherit; }
+
+    .wrap {
+      width: 100%;
+      padding: 24px 10px;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .card {
+      max-width: 500px;
+      height: auto;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 18px;
+      box-shadow: 0 12px 35px rgba(15, 23, 42, 0.18);
+      overflow: hidden;
+    }
+
+    /* Top brand strip */
+    .brand-bar {
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #f5f5f5;
+    }
+
+    .brand-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .brand-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .brand-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .pill {
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: #16a34a;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Hero block */
+    .hero {
+      background: #f6f1ea;
+      padding: 10px 18px 10px; /* smaller hero height */
+    }
+
+    .hero-table {
+      width: 100%;
+    }
+
+    .hero-title {
+      font-size: 20px;
+      line-height: 26px;
+      font-weight: 700;
+      color: #3f3c3a;
+      margin: 0 0 8px;
+    }
+
+    .hero-button {
+      display: inline-block;
+      margin: 10px 0 14px;
+      padding: 8px 18px;
+      border-radius: 999px;
+      background: #0d5f96;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .hero-body {
+      font-size: 13px;
+      color: #4b5563;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .hero-image {
+      width: 60px; /* reduce image height to shrink hero block */
+    }
+
+    /* Main body text (rich) */
+    .body {
+      padding: 28px 18px 18px; /* increase body padding to make card taller */
+      font-size: 14px;
+      color: #111827;
+      line-height: 1.6;
+    }
+
+    .body p { margin: 0 0 8px; }
+
+    .greeting {
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+
+    .sign-off {
+      margin-top: 14px;
+    }
+
+    .sign-off strong { font-weight: 600; }
+
+    /* Dark footer band */
+    .footer-band {
+      background: #111827;
+      color: #e5e7eb;
+      padding: 14px 18px 16px;
+      font-size: 11px;
+    }
+
+    .footer-columns {
+      width: 100%;
+    }
+
+    .footer-heading {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .footer-text {
+      margin: 0 0 4px;
+    }
+
+    .footer-links {
+      text-align: right;
+    }
+
+    .footer-links a {
+      color: #e5e7eb;
+      font-size: 11px;
+    }
+
+    .social-row {
+      margin-top: 10px;
+      text-align: left;
+    }
+
+    .social-row a {
+      display: inline-block;
+      margin-right: 6px;
+    }
+
+    .social-row img {
+      width: 18px;
+      height: 18px;
+    }
+
+    @media (max-width: 480px) {
+      .card { max-width: 100%; }
+      .footer-links { text-align: left; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <center class="wrap">
+    <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0">
+      <!-- Brand strip -->
+      <tr>
+        <td class="brand-bar">
+          <div class="brand-left">
+            <div class="brand-logo">
+              <img src="https://wpstaq-ap-southeast-2-media.s3.amazonaws.com/disabilityexpos/wp-content/uploads/media/2025/10/DEA-Connecting-Communities.jpg"
+                   alt="DEA CRM Logo">
+            </div>
+            <div class="brand-name">DEA CRM</div>
+          </div>
+          <div class="pill">
+            Welcome
+          </div>
+        </td>
+      </tr>
+
+      <!-- Hero block with left text + right image -->
+      <tr>
+        <td class="hero">
+          <table role="presentation" class="hero-table" cellpadding="0" cellspacing="0">
+            <tr>
+              <td valign="top" style="padding-right:10px;">
+                <h1 class="hero-title">Welcome to DEA CRM</h1>
+                <p class="hero-body">
+                  Dear {{ receiver_name|capfirst }}
+                </p>
+              </td>
+              <td valign="top" align="right">
+                <img class="hero-image"
+                     src="https://wpstaq-ap-southeast-2-media.s3.amazonaws.com/disabilityexpos/wp-content/uploads/media/2025/10/DEA-Connecting-Communities.jpg"
+                     alt="Welcome image">
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Full rich body below hero -->
+      <tr>
+        <td class="body">
+          {{ body_html|safe }}
+          <div class="sign-off">
+            <p>Best regards,</p>
+            <p><strong>Team DEA CRM</strong></p>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Dark footer band -->
+      <tr>
+        <td class="footer-band">
+          <table role="presentation" class="footer-columns" cellpadding="0" cellspacing="0">
+            <tr>
+              <td valign="top">
+                <div class="footer-heading">Disability Expos Australia</div>
+                <p class="footer-text">info@disabilityexpo.com.au</p>
+                <div class="social-row">
+                  <a href="https://deacrm.commedia.au" target="_blank">
+                    <img src="https://wyndham.hospitalityessentials.com/assets/images/facebook.png" alt="Facebook">
+                  </a>
+                  <a href="https://deacrm.commedia.au" target="_blank">
+                    <img src="https://wyndham.hospitalityessentials.com/assets/images/instagram.png" alt="Instagram">
+                  </a>
+                  <a href="https://deacrm.commedia.au" target="_blank">
+                    <img src="https://wyndham.hospitalityessentials.com/assets/images/twitter_new.png" alt="Twitter">
+                  </a>
+                </div>
+              </td>
+              <td valign="top" class="footer-links">
+                <p class="footer-text"><a href="#">Privacy</a></p>
+                <p class="footer-text"><a href="#">Terms</a></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </center>
+</body>
+</html>
+

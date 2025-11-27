@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ subject|capfirst }}</title>
+
+  <style>
+    /* Reset */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #eef2ff;
+    }
+    table { border-collapse: collapse; }
+    img { border: 0; display: block; max-width: 100%; height: auto; }
+    a { text-decoration: none; color: inherit; }
+
+    /* Outer layout */
+    .wrap {
+      width: 100%;
+      background: #eef2ff;
+      padding: 24px 10px;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .card {
+      max-width: 700px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+      border: 1px solid #e5e7eb;
+    }
+
+    /* HEADER: split layout – colored sidebar + content */
+    .header-row {
+      width: 100%;
+    }
+
+    .header-aside {
+      width: 26%;
+      background: linear-gradient(180deg,#0f766e,#0369a1);
+      padding: 20px 14px;
+      text-align: center;
+      color: #e0f2fe;
+    }
+
+    .header-main {
+      width: 74%;
+      padding: 18px 22px;
+      background: #f9fafb;
+    }
+
+    .logo-circle {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 10px;
+      border-radius: 999px;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.4);
+    }
+
+    .logo-circle img {
+      width: 54px;
+      height: 54px;
+      border-radius: 999px;
+      object-fit: contain;
+    }
+
+    .brand-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand-tagline {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .header-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 11px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      margin-bottom: 8px;
+    }
+
+    .header-chip-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #16a34a;
+    }
+
+    .crm-title {
+      margin: 0 0 4px;
+      font-size: 20px;
+      line-height: 26px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .crm-subtitle {
+      margin: 0;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    /* Subject strip */
+    .subject-strip {
+      padding: 18px 26px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      background: linear-gradient(to right,#ffffff,#f9fafb);
+    }
+
+    .subject-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: #9ca3af;
+      margin: 0 0 4px;
+    }
+
+    .subject-text {
+      margin: 0;
+      font-size: 19px;
+      line-height: 26px;
+      font-weight: 600;
+      color: #111827;
+    }
+
+    /* Body */
+    .body {
+      padding: 20px 26px 8px;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #111827;
+    }
+
+    .body p { margin: 0 0 10px; }
+
+    .greeting {
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+
+    .rich {
+      margin-bottom: 16px;
+    }
+
+    .sign-off {
+      margin-top: 18px;
+    }
+
+    .sign-off strong {
+      font-weight: 600;
+    }
+
+    /* Info row */
+    .info-row {
+      padding: 14px 26px 16px;
+      background: #f9fafb;
+      border-top: 1px solid #e5e7eb;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #4b5563;
+    }
+
+    .info-pair {
+      margin-bottom: 4px;
+    }
+
+    .info-label {
+      font-weight: 600;
+      color: #111827;
+    }
+
+    /* Social + footer */
+    .footer-wrap {
+      padding: 14px 0 18px;
+      text-align: center;
+    }
+
+    .social-row {
+      margin-bottom: 8px;
+    }
+
+    .social-row a {
+      display: inline-block;
+      margin: 0 6px;
+    }
+
+    .social-row img {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+    }
+
+    .footer-note {
+      font-size: 11px;
+      color: #9ca3af;
+      margin: 4px 0 0;
+    }
+
+    .footer-note a {
+      color: #4f46e5;
+    }
+
+    @media (max-width: 640px) {
+      .wrap { padding: 14px 6px; }
+      .card { border-radius: 14px; }
+      .header-aside,
+      .header-main {
+        display: block;
+        width: 100%;
+      }
+      .header-main {
+        padding: 16px 16px;
+      }
+      .subject-strip, .body, .info-row { padding: 16px 16px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <center class="wrap">
+    <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0">
+      <!-- Split header: left brand bar + right subject snippet -->
+      <tr class="header-row">
+        <td>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="header-aside">
+                <div class="logo-circle">
+                  <img src="https://wpstaq-ap-southeast-2-media.s3.amazonaws.com/disabilityexpos/wp-content/uploads/media/2025/10/DEA-Connecting-Communities.jpg"
+                       alt="DEA CRM Logo">
+                </div>
+                <div class="brand-name">DEA CRM</div>
+                <div class="brand-tagline">Disability Expos Australia</div>
+              </td>
+              <td class="header-main">
+                <h1 class="crm-title">{{ subject|capfirst }}</h1>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td class="body">
+          <p class="greeting">
+            Dear {{ receiver_name|capfirst }},
+          </p>
+
+          <div class="rich">
+            {{ body_html|safe }}
+          </div>
+
+          <div class="sign-off">
+            <p>Best regards,</p>
+            <p><strong>Team DEA CRM</strong></p>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Info row -->
+      <tr>
+        <td class="info-row">
+          <div class="info-pair">
+            <span class="info-label">Sent via:&nbsp;</span>
+            <span>DEA CRM Communication Center</span>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Social + footer -->
+      <tr>
+        <td class="footer-wrap">
+          <div class="social-row">
+            <a href="https://www.facebook.com" target="_blank">
+              <img src="https://wyndham.hospitalityessentials.com/assets/images/facebook.png" alt="Facebook">
+            </a>
+            <a href="https://www.instagram.com" target="_blank">
+              <img src="https://wyndham.hospitalityessentials.com/assets/images/instagram.png" alt="Instagram">
+            </a>
+            <a href="https://twitter.com" target="_blank">
+              <img src="https://wyndham.hospitalityessentials.com/assets/images/twitter_new.png" alt="Twitter / X">
+            </a>
+            <a href="https://www.youtube.com" target="_blank">
+              <img src="https://wyndham.hospitalityessentials.com/assets/images/youtube.png" alt="YouTube">
+            </a>
+          </div>
+          <p class="footer-note">
+            For questions, reply to this email or contact
+            <a href="mailto:info@disabilityexpo.com.au">info@disabilityexpo.com.au</a>.
+          </p>
+          <p class="footer-note">
+            © {{ mail.created_at|date:"Y" }} Disability Expos Australia / DEA CRM.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </center>
+</body>
+</html>
+
+

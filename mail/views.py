@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 # Map Mail.template keys to actual Django template files
 TEMPLATE_MAP = {
     # DEA CRM branded template
-    'dea_crm': 'mail/mail_template1.html',
-    'dea_crm_2': 'mail/mail_template2.html',
+    'template_1': 'mail/mail_template1.html',
+    'template_2': 'mail/mail_template2.html',
+    'template_3': 'mail/mail_template3.html',
+    'template_4': 'mail/mail_template4.html',
+    'template_5': 'mail/mail_template5.html',
 }
 
 @extend_schema_view(

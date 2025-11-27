@@ -93,6 +93,11 @@ class MailSerializer(serializers.ModelSerializer):
             'sender_id', 'receiver_ids', 'sender', 'receivers', 'is_read'
         ]
         read_only_fields = ['created_at', 'updated_at', 'attachments', 'sender', 'receivers']
+        extra_kwargs = {
+            # Subject and body are optional – allow empty / null
+            'subject': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'body': {'required': False, 'allow_blank': True, 'allow_null': True},
+        }
 
     def validate_templates(self, value):
         """
