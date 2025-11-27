@@ -55,7 +55,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = [
-            'id', 'custom_email_addresses',
+            'id', 'custom_email_addresses', 'event',
             'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'full_name', 'date_received', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
