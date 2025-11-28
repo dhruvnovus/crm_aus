@@ -1531,3 +1531,133 @@ class SponsorshipTypeViewSet(viewsets.ModelViewSet):
             {"success": True, "message": "Sponsorship type deleted successfully"},
             status=status.HTTP_200_OK
         )
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from lead.models import Lead
+
+@extend_schema(
+    summary="Zapier lead webhook",
+    description="Create or update a Lead from Zapier payload.",
+    tags=["Leads"],
+    request=OpenApiTypes.OBJECT,
+    responses={200: OpenApiTypes.OBJECT},
+)
+@api_view(['POST'])
+def zapier_lead_webhook(request):
+    """
+    Webhook endpoint for Zapier to create/update Leads.
+
+    Expected Zapier fields (column names):
+    - Account Id
+    - Zap Id
+    - Lead Reference
+    - Lead Name
+    - Lead Email
+    - Phone Number
+    - Company Name
+    - Participation Type
+    - Source
+    - Special Notes
+    - Zap Path Run Id
+    - Parent Task History Link
+
+    Mapping to Lead model:
+    - Lead Name          -> lead_name (also split into first_name / last_name)
+    - Lead Email         -> email_address
+    - Phone Number       -> contact_number
+    - Company Name       -> company_name
+    - Participation Type -> lead_type
+    - Source             -> how_did_you_hear
+    - Special Notes      -> reason_for_enquiry
+
+    Other Zapier fields (Account Id, Zap Id, Lead Reference, Zap Path Run Id,
+    Parent Task History Link) are currently ignored and not stored.
+    """
+    data = request.data
+
+    # Support both "Lead Name" (Zapier label) and "lead_name" (JSON key) styles
+    raw_lead_name = (
+        data.get("Lead Name")
+        or data.get("lead_name")
+        or ""
+    )
+    lead_email = (
+        data.get("Lead Email")
+        or data.get("lead_email")
+        or data.get("email")
+        or ""
+    )
+    phone_number = (
+        data.get("Phone Number")
+        or data.get("phone_number")
+        or data.get("phone")
+        or ""
+    )
+    company_name = (
+        data.get("Company Name")
+        or data.get("company_name")
+        or ""
+    )
+    participation_type = (
+        data.get("Participation Type")
+        or data.get("participation_type")
+        or ""
+    )
+    source = (
+        data.get("Source")
+        or data.get("source")
+        or ""
+    )
+    special_notes = (
+        data.get("Special Notes")
+        or data.get("special_notes")
+        or ""
+    )
+
+    # Split full name into first and last name (very simple split)
+    name_parts = raw_lead_name.strip().split()
+    if len(name_parts) == 0:
+        first_name = "Unknown"
+        last_name = ""
+    elif len(name_parts) == 1:
+        first_name = name_parts[0]
+        last_name = ""
+    else:
+        first_name = name_parts[0]
+        last_name = " ".join(name_parts[1:])
+
+    defaults = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "company_name": company_name or "Unknown",
+        "contact_number": phone_number,
+        "email_address": lead_email,
+        "lead_name": raw_lead_name or None,
+        "lead_type": participation_type or Lead.TYPE_CHOICES[0][0],
+        "how_did_you_hear": source or None,
+        "reason_for_enquiry": special_notes or None,
+    }
+
+    # Use email as primary identifier if present; otherwise phone number.
+    lookup = {}
+    if lead_email:
+        lookup["email_address"] = lead_email
+    elif phone_number:
+        lookup["contact_number"] = phone_number
+
+    if lookup:
+        lead, created = Lead.objects.update_or_create(
+            **lookup,
+            defaults=defaults,
+        )
+    else:
+        # No stable identifier, always create a new lead
+        lead = Lead.objects.create(**defaults)
+        created = True
+
+    return Response(
+        {"status": "success", "created": created, "lead_id": lead.id},
+        status=status.HTTP_200_OK,
+    )
