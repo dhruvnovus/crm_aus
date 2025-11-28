@@ -267,6 +267,27 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
 				'secondary_mobile_phone_code': 'Provide the same number of country codes as secondary numbers or leave the codes empty.'
 			})
 
+		# Cross-field validation: primary vs secondary mobiles
+		primary_number = (attrs.get('mobile_phone') or '').strip()
+		primary_code = (attrs.get('mobile_phone_code') or '').strip()
+
+		if primary_number and numbers_final:
+			for idx, sec_raw in enumerate(numbers_final):
+				sec_number = str(sec_raw or '').strip()
+				if not sec_number:
+					continue
+				sec_code = ''
+				if codes_final and idx < len(codes_final):
+					sec_code = str(codes_final[idx] or '').strip()
+				# Block only when BOTH number and country code are identical
+				if sec_number == primary_number and sec_code == primary_code:
+					raise serializers.ValidationError({
+						'secondary_mobile_numbers': (
+							'Secondary mobile number cannot be the same as the primary '
+							'number for the same country code.'
+						)
+					})
+
 		return attrs
 
 	def validate_password(self, value):
