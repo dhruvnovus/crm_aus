@@ -9,7 +9,6 @@ from django.db.models.functions import Concat
 from django.http import Http404
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
-
 from .models import Lead, LeadHistory, RegistrationGroup, LeadTag, SponsorshipType
 from .serializers import (
     LeadListSerializer,
@@ -22,6 +21,9 @@ from .serializers import (
     LeadTagSerializer,
     SponsorshipTypeSerializer
 )
+import json
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
 
 class LeadPagination(PageNumberPagination):
@@ -1532,12 +1534,6 @@ class SponsorshipTypeViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from lead.models import Lead
-
 @extend_schema(
     summary="Zapier lead webhook",
     description="Create or update a Lead from Zapier payload.",
@@ -1578,86 +1574,99 @@ def zapier_lead_webhook(request):
     Parent Task History Link) are currently ignored and not stored.
     """
     data = request.data
+    print(data, "data from zapier")
 
-    # Support both "Lead Name" (Zapier label) and "lead_name" (JSON key) styles
-    raw_lead_name = (
-        data.get("Lead Name")
-        or data.get("lead_name")
-        or ""
-    )
-    lead_email = (
-        data.get("Lead Email")
-        or data.get("lead_email")
-        or data.get("email")
-        or ""
-    )
-    phone_number = (
-        data.get("Phone Number")
-        or data.get("phone_number")
-        or data.get("phone")
-        or ""
-    )
-    company_name = (
-        data.get("Company Name")
-        or data.get("company_name")
-        or ""
-    )
-    participation_type = (
-        data.get("Participation Type")
-        or data.get("participation_type")
-        or ""
-    )
-    source = (
-        data.get("Source")
-        or data.get("source")
-        or ""
-    )
-    special_notes = (
-        data.get("Special Notes")
-        or data.get("special_notes")
-        or ""
-    )
+    # Normalise keys (case-insensitive, ignore spaces/underscores) so that
+    # Zapier field name variations still map correctly.
+    normalized = {}
+    for key, value in data.items():
+        normalized[key] = value
+        norm_key = str(key).strip().lower().replace(" ", "").replace("_", "")
+        if norm_key not in normalized:
+            normalized[norm_key] = value
+
+    def _get_any(*candidates):
+        """
+        Helper to fetch a value from request data by trying multiple key variants,
+        including a normalised (lowercase, no space/underscore) version.
+        """
+        for candidate in candidates:
+            # direct key match
+            if candidate in data and data.get(candidate) not in ("", None):
+                return data.get(candidate)
+            # normalised key match
+            norm = str(candidate).strip().lower().replace(" ", "").replace("_", "")
+            if norm in normalized and normalized.get(norm) not in ("", None):
+                return normalized.get(norm)
+        return ""
+
+    # Support multiple naming styles from Zapier
+    raw_lead_name = _get_any("Lead Name", "lead_name", "leadname", "name")
+    title = _get_any("Title", "title", "title", "title")
+    lead_email = _get_any("Lead Email", "lead_email", "email", "email_address")
+    phone_number = _get_any("Phone Number", "phone_number", "phone", "contact_number")
+    company_name = _get_any("Company Name", "company_name")
+    participation_type = _get_any("Participation Type", "participation_type", "lead_type")
+    source = _get_any("Source", "source", "how_did_you_hear")
+    special_notes = _get_any("Special Notes", "special_notes", "notes", "reason_for_enquiry")
+    first_name = _get_any("First Name", "first_name", "firstname", "fname")
+    last_name = _get_any("Last Name", "last_name", "lastname", "lname")
+    full_name = _get_any("Full Name", "full_name", "fullname", "full name")
+    lead_stage = _get_any("Lead Stage", "lead_stage", "leadstage", "lead stage")
+    lead_pipeline = _get_any("Lead Pipeline", "lead_pipeline", "leadpipeline", "lead pipeline")
+    booth_size = _get_any("Booth Size", "booth_size", "boothsize", "booth size")
+    sponsorship_type = _get_any("Sponsorship Type", "sponsorship_type", "sponsorshiptype", "sponsorship type")
+    registration_group = _get_any("Registration Group", "registration_group", "registrationgroup", "registration group")
+    status = _get_any("Status", "status", "status", "status")
+    intensity = _get_any("Intensity", "intensity", "intensity", "intensity")
+    opportunity_price = _get_any("Opportunity Price", "opportunity_price", "opportunityprice", "opportunity price")
+    tags = _get_any("Tags", "tags", "tags", "tags")
+    # If no explicit full_name, fall back to "Lead Name"
+    if not full_name:
+        full_name = raw_lead_name or ""
 
     # Split full name into first and last name (very simple split)
-    name_parts = raw_lead_name.strip().split()
-    if len(name_parts) == 0:
-        first_name = "Unknown"
-        last_name = ""
-    elif len(name_parts) == 1:
-        first_name = name_parts[0]
-        last_name = ""
-    else:
-        first_name = name_parts[0]
-        last_name = " ".join(name_parts[1:])
+    name_parts = full_name.strip().split()
+    if not first_name and not last_name:
+        # Only derive if explicit first/last not provided
+        if len(name_parts) == 0:
+            first_name = "Unknown"
+            last_name = ""
+        elif len(name_parts) == 1:
+            first_name = name_parts[0]
+            last_name = ""
+        else:
+            first_name = name_parts[0]
+            last_name = " ".join(name_parts[1:])
 
+    # Build defaults for Lead model
     defaults = {
+        "title": title or None,
         "first_name": first_name,
         "last_name": last_name,
-        "company_name": company_name or "Unknown",
+        "company_name": company_name,
         "contact_number": phone_number,
         "email_address": lead_email,
         "lead_name": raw_lead_name or None,
         "lead_type": participation_type or Lead.TYPE_CHOICES[0][0],
         "how_did_you_hear": source or None,
         "reason_for_enquiry": special_notes or None,
+        "lead_stage": lead_stage or None,
+        "lead_pipeline": lead_pipeline or None,
+        "booth_size": booth_size or None,
+        "sponsorship_type": sponsorship_type or None,
+        "registration_group": registration_group or None,
+        "status": status or None,
+        "intensity": intensity or None,
+        "opportunity_price": opportunity_price or None,
+        "tags": tags or None,
     }
 
-    # Use email as primary identifier if present; otherwise phone number.
-    lookup = {}
-    if lead_email:
-        lookup["email_address"] = lead_email
-    elif phone_number:
-        lookup["contact_number"] = phone_number
+    # Debug logging to verify what we are about to save
+    print("Zapier defaults:", defaults)
 
-    if lookup:
-        lead, created = Lead.objects.update_or_create(
-            **lookup,
-            defaults=defaults,
-        )
-    else:
-        # No stable identifier, always create a new lead
-        lead = Lead.objects.create(**defaults)
-        created = True
+    lead = Lead.objects.create(**defaults)
+    created = True
 
     return Response(
         {"status": "success", "created": created, "lead_id": lead.id},
