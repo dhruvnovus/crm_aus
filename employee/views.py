@@ -11,8 +11,8 @@ from django.db.models import Q, Count, F, Value, CharField
 from django.db.models.functions import Concat
 from django.db import transaction, IntegrityError
 from django.http import Http404
-from django.core.mail import send_mail
 from django.conf import settings
+from mail.email_service import send_email_via_smtp2go
 from django.utils import timezone
 from datetime import timedelta
 from dotenv import load_dotenv
@@ -977,7 +977,7 @@ def forgot_password(request):
             reset_link = f"{APP_URL}reset-password?token={reset_token.token}"
             
             subject = "Password Reset Request"
-            message = f"""Hello {employee.full_name},
+            text_body = f"""Hello {employee.full_name},
 
 We received a request to reset your password. Click the link below to set a new password:
 
@@ -989,20 +989,28 @@ Thank you,
 YourApp Support Team"""
             
             try:
-                send_mail(
-                    subject,
-                    message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [employee.email],
-                    fail_silently=False,
+                # Use the same email service as mail app
+                result = send_email_via_smtp2go(
+                    to_emails=[employee.email],
+                    subject=subject,
+                    text_body=text_body,
+                    sender_email=None,  # Will use DEFAULT_FROM_EMAIL from settings
                 )
                 
-                return Response({
-                    "success": True,
-                    "message": "Password reset link sent to your email address."
-                }, status=status.HTTP_200_OK)
+                if result.get('success'):
+                    return Response({
+                        "success": True,
+                        "message": "Password reset link sent to your email address."
+                    }, status=status.HTTP_200_OK)
+                else:
+                    logger.error(f"Failed to send password reset email: {result.get('error')}")
+                    return Response({
+                        "success": False,
+                        "message": "Failed to send email. Please try again later."
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
             except Exception as e:
+                logger.error(f"Error sending password reset email: {str(e)}", exc_info=True)
                 return Response({
                     "success": False,
                     "message": "Failed to send email. Please try again later."
