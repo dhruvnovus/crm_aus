@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import LeadViewSet, RegistrationGroupViewSet, LeadTagViewSet, SponsorshipTypeViewSet
-from .views import zapier_lead_webhook
+from .webhook_views import zapier_lead_webhook
 # Create a router and register our viewsets with it
 # Use default trailing_slash=True to accept URLs with trailing slashes
 # This prevents 404 errors when clients send requests like /api/leads/1/
