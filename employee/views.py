@@ -40,7 +40,6 @@ from .serializers import (
 )
 
 load_dotenv()
-APP_URL = os.getenv('FRONTEND_URL')
 logger = logging.getLogger('crm_aus')
 
 class EmployeePagination(PageNumberPagination):
@@ -973,8 +972,13 @@ def forgot_password(request):
             # Create password reset token
             reset_token = PasswordResetToken.create_token(employee)
             
-            # Send email with reset link
-            reset_link = f"{APP_URL}reset-password?token={reset_token.token}"
+            frontend_url = os.getenv('FRONTEND_URL', '').rstrip('/')
+            if not frontend_url:
+                return Response({
+                    "success": False,
+                    "message": "Server configuration error. Please contact support."
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            reset_link = f"{frontend_url}/reset-password?token={reset_token.token}"
             
             subject = "Password Reset Request"
             text_body = f"""Hello {employee.full_name},
