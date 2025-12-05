@@ -36,8 +36,8 @@ class Mail(models.Model):
     template = models.CharField(
         max_length=255,
         choices=TEMPLATE_CHOICES,
-        default='Template 1',
         blank=True,
+        null=True,
         help_text="Template to use when sending",
     )
     direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='outbound')

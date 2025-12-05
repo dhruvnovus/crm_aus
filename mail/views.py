@@ -283,8 +283,10 @@ class MailViewSet(viewsets.ModelViewSet):
             email_to_name = {}
 
         # Resolve which HTML template to use based on Mail.template field
-        template_key = getattr(mail_instance, 'template', None) or 'Template 1'
-        template_name = TEMPLATE_MAP.get(template_key, TEMPLATE_MAP['Template 1'])
+        # If template is None, send email with raw body content (no template wrapper)
+        template_key = getattr(mail_instance, 'template', None)
+        use_template = template_key is not None and template_key in TEMPLATE_MAP
+        template_name = TEMPLATE_MAP.get(template_key) if use_template else None
 
         # Send one personalized email per recipient so each sees their own name
         # Also persist the first rendered HTML back to Mail.body so the API
@@ -300,34 +302,39 @@ class MailViewSet(viewsets.ModelViewSet):
             receiver_name = email_to_name.get(email_str.lower(), email_str)
 
             try:
-                html_body = render_to_string(
-                    template_name,
-                    {
-                        "subject": mail_instance.subject,
-                        "body_html": mail_instance.body or "",
-                        "from_email": from_email,
-                        "receiver_name": receiver_name,
-                        "to_emails": [email_str],
-                        "cc_emails": cc_recipients,
-                        "bcc_emails": bcc_recipients,
-                        "mail": mail_instance,
-                    },
-                )
+                if use_template and template_name:
+                    # Use template wrapper if template is selected
+                    html_body = render_to_string(
+                        template_name,
+                        {
+                            "subject": mail_instance.subject,
+                            "body_html": mail_instance.body or "",
+                            "from_email": from_email,
+                            "receiver_name": receiver_name,
+                            "to_emails": [email_str],
+                            "cc_emails": cc_recipients,
+                            "bcc_emails": bcc_recipients,
+                            "mail": mail_instance,
+                        },
+                    )
 
-                # Overwrite stored body once with the rendered HTML so that
-                # API consumers (React app) can display the exact same content
-                # that was sent via SMTP.
-                if not persisted_rendered_body:
-                    mail_instance.body = html_body
-                    try:
-                        mail_instance.save(update_fields=["body", "updated_at"])
-                    except Exception:
-                        # Do not block sending if we fail to persist the HTML
-                        logger.warning(
-                            f"Mail {mail_instance.id}: Failed to persist rendered HTML body; continuing to send emails",
-                            exc_info=True,
-                        )
-                    persisted_rendered_body = True
+                    # Overwrite stored body once with the rendered HTML so that
+                    # API consumers (React app) can display the exact same content
+                    # that was sent via SMTP.
+                    if not persisted_rendered_body:
+                        mail_instance.body = html_body
+                        try:
+                            mail_instance.save(update_fields=["body", "updated_at"])
+                        except Exception:
+                            # Do not block sending if we fail to persist the HTML
+                            logger.warning(
+                                f"Mail {mail_instance.id}: Failed to persist rendered HTML body; continuing to send emails",
+                                exc_info=True,
+                            )
+                        persisted_rendered_body = True
+                else:
+                    # No template selected - use raw body content directly
+                    html_body = mail_instance.body or ""
             except Exception as e:
                 # Fallback to raw body if template rendering fails
                 logger.error(
