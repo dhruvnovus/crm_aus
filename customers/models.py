@@ -55,6 +55,16 @@ class Customer(models.Model):
 	password = models.CharField(max_length=128)
 	type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='exhibitor')
 	event = models.CharField(max_length=200, blank=True, null=True)
+	activity_notes = models.TextField(
+		blank=True,
+		null=True,
+		help_text="Activity notes"
+	)
+	follow_up_date = models.DateTimeField(
+		blank=True,
+		null=True,
+		help_text="Follow up date and time"
+	)
 	is_deleted = models.BooleanField(default=False)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)

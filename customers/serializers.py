@@ -50,7 +50,8 @@ class CustomerListSerializer(serializers.ModelSerializer):
 			'contact_number', 'mobile_phone_code', 'email_address', 'secondary_mobile_numbers',
 			'secondary_mobile_phone_code', 'secondary_mobile_type',
 			'address', 'abn_no', 'position',
-			'type', 'type_display', 'event', 'created_at', 'updated_at', 'is_deleted'
+			'type', 'type_display', 'event', 'activity_notes', 'follow_up_date',
+			'created_at', 'updated_at', 'is_deleted'
 		]
 		read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
@@ -97,7 +98,8 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
 			'contact_number', 'mobile_phone_code', 'email_address', 'secondary_mobile_numbers',
 			'secondary_mobile_phone_code', 'secondary_mobile_type',
 			'address', 'abn_no', 'position',
-			'password', 'type', 'type_display', 'event', 'created_at', 'updated_at', 'is_deleted'
+			'password', 'type', 'type_display', 'event', 'activity_notes', 'follow_up_date',
+			'created_at', 'updated_at', 'is_deleted'
 		]
 		read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 		extra_kwargs = {
@@ -137,7 +139,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 		fields = [
 			'id', 'first_name', 'last_name', 'full_name', 'company_name', 'company_logo',
 			'mobile_phone', 'mobile_phone_code', 'secondary_mobile_numbers', 'secondary_mobile_phone_code', 'secondary_mobile_type', 'email', 'address', 'abn_no', 'position',
-			'type', 'event', 'is_deleted', 'created_at', 'updated_at'
+			'type', 'event', 'activity_notes', 'follow_up_date', 'is_deleted', 'created_at', 'updated_at'
 		]
 		read_only_fields = ['id', 'created_at', 'updated_at', 'is_deleted']
 
@@ -175,7 +177,7 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
 			'first_name', 'last_name', 'full_name', 'company_name', 'company_logo',
 			'mobile_phone', 'mobile_phone_code', 'secondary_mobile_numbers', 'secondary_mobile_phone_code',
 			'secondary_mobile_type', 'email', 'address', 'abn_no', 'position',
-			'password', 'type', 'event', 'is_deleted'
+			'password', 'type', 'event', 'activity_notes', 'follow_up_date', 'is_deleted'
 		]
 		read_only_fields = ['is_deleted', 'full_name']
 		extra_kwargs = {

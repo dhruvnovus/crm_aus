@@ -9,10 +9,13 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import transaction, IntegrityError
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
-from .models import Task, TaskHistory, TaskAttachment, Subtask
+from .models import Task, TaskHistory, TaskAttachment, Subtask, TaskReminder
 from employee.models import Employee
 from .serializers import TaskSerializer, TaskHistorySerializer, TaskAttachmentSerializer
-
+from rest_framework_simplejwt.tokens import UntypedToken
+from rest_framework_simplejwt.exceptions import InvalidToken
+from django.contrib.auth.models import User
+from task.sse import sse_reminder_stream
 
 @extend_schema_view(
     list=extend_schema(
@@ -522,3 +525,283 @@ class TaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Attachment deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
         except TaskAttachment.DoesNotExist:
             raise Http404("Attachment not found")
+
+    @extend_schema(
+        summary="SSE stream for task reminders",
+        description="Server-Sent Events stream for receiving real-time task reminders. "
+                    "Requires authentication via JWT token.\n\n"
+                    "**For browser clients (EventSource API):** Use `?token=<jwt_token>` query parameter "
+                    "(EventSource doesn't support custom headers).\n\n"
+                    "**For non-browser clients:** Use `Authorization: Bearer <jwt_token>` header.",
+        tags=["Tasks"],
+        parameters=[
+            OpenApiParameter(
+                name='token',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description='JWT token for authentication (required for browser EventSource API)'
+            ),
+        ],
+    )
+    @action(detail=False, methods=['get'], url_path='reminders/stream')
+    def reminder_stream(self, request):
+        """
+        SSE endpoint for streaming real-time task reminders.
+        Connects to the reminder event stream for the authenticated user.
+        """
+       
+        employee = None
+        token = None
+        
+        # Try to get token from Authorization header first
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        # Fallback to query parameter if no Authorization header
+        if not token:
+            token = request.query_params.get('token')
+        
+        if token:
+            try:
+                untyped_token = UntypedToken(token)
+                user_id = getattr(untyped_token, 'payload', {}).get('user_id')
+                if user_id:
+                    django_user = User.objects.get(id=user_id)
+                    # Find Employee by email
+                    employee = Employee.objects.filter(email=django_user.username, is_active=True).first()
+                    if not employee:
+                        employee = Employee.objects.filter(email=django_user.email, is_active=True).first()
+            except (User.DoesNotExist, InvalidToken, Exception) as e:
+                import logging
+                logger = logging.getLogger("dea_crm")
+                logger.error(f"Error authenticating for reminder stream: {str(e)}")
+        
+        if not employee:
+            employee = self._actor()
+        
+        if not employee:
+            return Response(
+                {'error': 'Authentication required. Provide JWT token via Authorization header or ?token query parameter.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        return sse_reminder_stream(request, employee.id)
+
+    @extend_schema(
+        summary="Snooze task reminder",
+        description="Snooze a task reminder for a specified number of minutes. The reminder will be shown again after the snooze period.",
+        tags=["Tasks"],
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'reminder_id': {'type': 'integer', 'description': 'ID of the reminder to snooze'},
+                    'minutes': {'type': 'integer', 'description': 'Number of minutes to snooze (default: 10)', 'default': 10}
+                },
+                'required': ['reminder_id']
+            }
+        },
+        responses={200: {'description': 'Reminder snoozed successfully'}},
+    )
+    @action(detail=False, methods=['post'], url_path='reminders/snooze')
+    def snooze_reminder(self, request):
+        """Snooze a task reminder"""
+        from datetime import timedelta
+        
+        reminder_id = request.data.get('reminder_id')
+        minutes = int(request.data.get('minutes', 10))
+        
+        if not reminder_id:
+            return Response(
+                {
+                    'detail': 'reminder_id is required',
+                    'reminder_id': None
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            reminder = TaskReminder.objects.get(id=reminder_id)
+            
+            # Verify the reminder belongs to a task assigned to the current user
+            employee = self._actor()
+            if not employee or reminder.task.assigned_to_id != employee.id:
+                return Response(
+                    {
+                        'detail': 'You do not have permission to snooze this reminder',
+                        'reminder_id': reminder_id
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Calculate new reminder time (add minutes to current time)
+            new_remind_at = timezone.now() + timedelta(minutes=minutes)
+            reminder.remind_at = new_remind_at
+            reminder.is_sent = False  # Reset so it can be triggered again
+            reminder.save(update_fields=['remind_at', 'is_sent'])
+            
+            # Create history entry
+            TaskHistory.objects.create(
+                task=reminder.task,
+                action='reminder_change',
+                changed_by=employee,
+                changes={
+                    'reminder': {
+                        'action': 'snoozed',
+                        'snoozed_until': new_remind_at.isoformat(),
+                        'snooze_minutes': minutes
+                    }
+                }
+            )
+            
+            return Response({
+                'status': 'snoozed',
+                'reminder_id': reminder.id,
+                'remind_at': new_remind_at.isoformat(),
+                'minutes': minutes,
+                'message': f'Reminder {reminder.id} snoozed for {minutes} minutes'
+            })
+        except TaskReminder.DoesNotExist:
+            return Response(
+                {
+                    'detail': 'Reminder not found',
+                    'reminder_id': reminder_id if reminder_id else None
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @extend_schema(
+        summary="Dismiss task reminder",
+        description="Dismiss a task reminder. The reminder will no longer be shown.",
+        tags=["Tasks"],
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'reminder_id': {'type': 'integer', 'description': 'ID of the reminder to dismiss'}
+                },
+                'required': ['reminder_id']
+            }
+        },
+        responses={200: {'description': 'Reminder dismissed successfully'}},
+    )
+    @action(detail=False, methods=['post'], url_path='reminders/dismiss')
+    def dismiss_reminder(self, request):
+        """Dismiss a task reminder"""
+        reminder_id = request.data.get('reminder_id')
+        
+        if not reminder_id:
+            return Response(
+                {
+                    'detail': 'reminder_id is required',
+                    'reminder_id': None
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            reminder = TaskReminder.objects.get(id=reminder_id)
+            
+            # Verify the reminder belongs to a task assigned to the current user
+            employee = self._actor()
+            if not employee or reminder.task.assigned_to_id != employee.id:
+                return Response(
+                    {
+                        'detail': 'You do not have permission to dismiss this reminder',
+                        'reminder_id': reminder_id
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Mark as dismissed and sent
+            reminder.is_sent = True
+            reminder.save(update_fields=['is_sent'])
+            
+            # Create history entry
+            TaskHistory.objects.create(
+                task=reminder.task,
+                action='reminder_change',
+                changed_by=employee,
+                changes={
+                    'reminder': {
+                        'action': 'dismissed',
+                        'reminder_id': reminder.id
+                    }
+                }
+            )
+            
+            return Response({
+                'status': 'dismissed',
+                'reminder_id': reminder.id,
+                'message': f'Reminder {reminder.id} dismissed successfully'
+            })
+        except TaskReminder.DoesNotExist:
+            return Response(
+                {
+                    'detail': 'Reminder not found',
+                    'reminder_id': reminder_id if reminder_id else None
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @extend_schema(
+        summary="Check pending reminders",
+        description="Check all pending reminders for the authenticated user. "
+                    "Shows all reminders that haven't been sent yet (both due and future reminders).",
+        tags=["Tasks"],
+        responses={200: {'description': 'Pending reminders list'}},
+    )
+    @action(detail=False, methods=['get'], url_path='reminders/pending')
+    def pending_reminders(self, request):
+        """Check pending reminders for the current user (all future and due reminders)"""
+        from task.models import TaskReminder
+        
+        employee = self._actor()
+        if not employee:
+            return Response(
+                {'detail': 'Authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        now = timezone.now()
+        
+        # Find ALL pending reminders (both due and future)
+        # Show ALL reminders regardless of task status - user can see what's pending
+        # The scheduler will still only send reminders for active tasks
+        pending_reminders = TaskReminder.objects.filter(
+            task__assigned_to_id=employee.id,
+            is_sent=False,  # Not sent yet
+            task__is_deleted=False  # Don't show deleted tasks
+            # Removed status filter - show all pending reminders
+        ).select_related('task').order_by('remind_at')
+        
+        reminders_data = []
+        for reminder in pending_reminders:
+            task = reminder.task
+            remind_at = reminder.remind_at
+            is_due = remind_at <= now
+            
+            reminders_data.append({
+                "reminder_id": reminder.id,
+                "task_id": task.id,
+                "task_title": task.title,
+                "task_description": task.description or "",
+                "remind_at": remind_at.isoformat(),
+                "remind_at_formatted": remind_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "due_date": str(task.due_date),
+                "due_time": str(task.due_time),
+                "priority": task.priority,
+                "task_status": task.status,
+                "is_due": is_due,  # True if remind_at <= now, False if future
+                "time_until_reminder": str(remind_at - now) if remind_at > now else "Due now",
+                "will_trigger": task.status in ['to_do', 'in_progress', 'on_hold'] and not task.is_deleted  # Will scheduler send this?
+            })
+        
+        return Response({
+            'count': len(reminders_data),
+            'current_time': now.isoformat(),
+            'employee_id': employee.id,
+            'reminders': reminders_data
+        })

@@ -297,6 +297,16 @@ class Lead(models.Model):
         default=False,
         help_text="Is deleted"
     )
+    activity_notes=models.TextField(
+        blank=True,
+        null=True,
+        help_text="Activity notes"
+    )
+    follow_up_date=models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Follow up date and time"
+    )
     # Timestamps
     date_received = models.DateTimeField(
         auto_now_add=True,

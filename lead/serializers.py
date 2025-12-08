@@ -26,13 +26,14 @@ class LeadListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = [
-            'id', 'custom_email_addresses',
+            'id', 'title', 'first_name', 'last_name', 'company_name', 'contact_number', 'email_address', 'custom_email_addresses',
             'event', 'lead_type', 'lead_type_display',
             'booth_size', 'sponsorship_type', 'registration_groups', 'status',
             'status_display', 'intensity', 'intensity_display', 'opportunity_price',
             'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry',
             'assigned_sales_staff', 'customer', 'lead_name', 'lead_pipeline', 'lead_stage',
-            'full_name', 'date_received', 'created_at', 'updated_at', 'is_deleted'
+            'full_name', 'date_received', 'activity_notes', 'follow_up_date',
+            'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
@@ -55,8 +56,8 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = [
-            'id', 'custom_email_addresses', 'event',
-            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'full_name', 'date_received', 'created_at', 'updated_at', 'is_deleted'
+            'id', 'title', 'first_name', 'last_name', 'company_name', 'contact_number', 'email_address', 'custom_email_addresses', 'event',
+            'lead_type', 'booth_size', 'sponsorship_type','registration_groups', 'status', 'intensity', 'opportunity_price', 'tags', 'tag_list', 'how_did_you_hear', 'reason_for_enquiry', 'assigned_sales_staff','customer', 'lead_name', 'lead_pipeline', 'lead_stage', 'full_name', 'date_received', 'activity_notes', 'follow_up_date', 'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = ['id', 'date_received', 'created_at', 'updated_at', 'is_deleted']
 
@@ -87,7 +88,8 @@ class LeadCreateUpdateSerializer(serializers.ModelSerializer):
             'email_address', 'custom_email_addresses', 'address', 'event',
             'lead_type', 'booth_size', 'sponsorship_type', 'registration_groups',
             'status', 'intensity', 'opportunity_price', 'tags', 'how_did_you_hear',
-            'reason_for_enquiry', 'assigned_sales_staff', 'employee_id', 'customer_id', 'lead_name', 'lead_pipeline', 'lead_stage'
+            'reason_for_enquiry', 'assigned_sales_staff', 'employee_id', 'customer_id', 'lead_name', 'lead_pipeline', 'lead_stage',
+            'activity_notes', 'follow_up_date'
         ]
         extra_kwargs = {
             'first_name': {'required': True},

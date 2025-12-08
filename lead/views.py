@@ -84,7 +84,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         'tags__name', 'sponsorship_type__name', 'registration_groups__name',
         'lead_name', 'lead_pipeline', 'lead_stage'
     ]
-    ordering_fields = ['date_received', 'created_at', 'updated_at', 'first_name', 'last_name', 'full_name', 'full_name_ordering', 'company_name', 'opportunity_price']
+    ordering_fields = ['date_received', 'created_at', 'updated_at', 'first_name', 'last_name', 'full_name', 'full_name_ordering', 'company_name', 'opportunity_price', 'event','tags']
     ordering = ['-date_received']
 
     @staticmethod

@@ -94,23 +94,44 @@ def zapier_lead_webhook(request):
     intensity = _get_any("Intensity", "intensity", "intensity", "intensity")
     opportunity_price = _get_any("Opportunity Price", "opportunity_price", "opportunityprice", "opportunity price")
     tags = _get_any("Tags", "tags", "tags", "tags")
-    # If no explicit full_name, fall back to "Lead Name"
-    if not full_name:
-        full_name = raw_lead_name or ""
-
-    # Split full name into first and last name (very simple split)
-    name_parts = full_name.strip().split()
-    if not first_name and not last_name:
-        # Only derive if explicit first/last not provided
+    
+    # Priority: full_name > raw_lead_name > explicit first_name/last_name
+    # If full_name is provided, use it to set first_name and last_name
+    if full_name:
+        # Split full_name into first and last name
+        name_parts = full_name.strip().split()
         if len(name_parts) == 0:
-            first_name = "Unknown"
-            last_name = ""
+            first_name = first_name or "Unknown"
+            last_name = last_name or ""
         elif len(name_parts) == 1:
             first_name = name_parts[0]
-            last_name = ""
+            last_name = last_name or ""
         else:
             first_name = name_parts[0]
             last_name = " ".join(name_parts[1:])
+    elif raw_lead_name:
+        # If no full_name but raw_lead_name exists, use it
+        name_parts = raw_lead_name.strip().split()
+        if not first_name and not last_name:
+            # Only derive if explicit first/last not provided
+            if len(name_parts) == 0:
+                first_name = "Unknown"
+                last_name = ""
+            elif len(name_parts) == 1:
+                first_name = name_parts[0]
+                last_name = ""
+            else:
+                first_name = name_parts[0]
+                last_name = " ".join(name_parts[1:])
+    else:
+        # If neither full_name nor raw_lead_name, use explicit first/last or defaults
+        if not first_name and not last_name:
+            first_name = "Unknown"
+            last_name = ""
+        elif not first_name:
+            first_name = "Unknown"
+        elif not last_name:
+            last_name = ""
 
     # Normalize title, status, and intensity to valid choices
     # Title field has default='mr' in model, so use that if not provided
