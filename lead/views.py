@@ -1394,6 +1394,7 @@ class LeadTagViewSet(viewsets.ModelViewSet):
     search_fields = ['name']
     ordering_fields = ['name', 'created_at', 'updated_at']
     ordering = ['-created_at']
+    pagination_class = None
 
     def get_queryset(self):
         """
@@ -1409,9 +1410,17 @@ class LeadTagViewSet(viewsets.ModelViewSet):
         List lead tags with optional filtering
         """
         queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page or queryset, many=True)
-        return self.get_paginated_response(serializer.data)
+        
+        # Handle pagination if enabled
+        if self.pagination_class is not None:
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+        
+        # No pagination - return all results
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
         """
